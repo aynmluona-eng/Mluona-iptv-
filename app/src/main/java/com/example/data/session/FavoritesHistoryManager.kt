@@ -24,34 +24,66 @@ class FavoritesHistoryManager(context: Context) {
         private const val MAX_RECENT_ITEMS = 40
     }
 
+    // In-memory high-speed cache for 0ms latency during fast TV remote navigation
+    private val favChannelsCache = mutableListOf<LiveChannel>()
+    private val favChannelIds = hashSetOf<Int>()
+    private val recentChannelsCache = mutableListOf<LiveChannel>()
+
+    private val favMoviesCache = mutableListOf<VodMovie>()
+    private val favMovieIds = hashSetOf<Int>()
+    private val recentMoviesCache = mutableListOf<VodMovie>()
+
+    private val favSeriesCache = mutableListOf<SeriesItem>()
+    private val favSeriesIds = hashSetOf<Int>()
+    private val recentSeriesCache = mutableListOf<SeriesItem>()
+
+    init {
+        // Pre-warm caches once on initialization
+        favChannelsCache.addAll(loadChannels(KEY_FAV_CHANNELS))
+        favChannelsCache.forEach { favChannelIds.add(it.streamId) }
+        recentChannelsCache.addAll(loadChannels(KEY_RECENT_CHANNELS))
+
+        favMoviesCache.addAll(loadMovies(KEY_FAV_MOVIES))
+        favMoviesCache.forEach { favMovieIds.add(it.streamId) }
+        recentMoviesCache.addAll(loadMovies(KEY_RECENT_MOVIES))
+
+        favSeriesCache.addAll(loadSeries(KEY_FAV_SERIES))
+        favSeriesCache.forEach { favSeriesIds.add(it.seriesId) }
+        recentSeriesCache.addAll(loadSeries(KEY_RECENT_SERIES))
+    }
+
     // ==========================================
     // LIVE CHANNELS
     // ==========================================
+    @Synchronized
     fun getFavoriteChannels(): List<LiveChannel> {
-        return loadChannels(KEY_FAV_CHANNELS)
+        return favChannelsCache.toList()
     }
 
     fun isChannelFavorite(streamId: Int): Boolean {
-        return getFavoriteChannels().any { it.streamId == streamId }
+        return favChannelIds.contains(streamId)
     }
 
+    @Synchronized
     fun toggleChannelFavorite(channel: LiveChannel): Boolean {
-        val list = getFavoriteChannels().toMutableList()
-        val index = list.indexOfFirst { it.streamId == channel.streamId }
+        val index = favChannelsCache.indexOfFirst { it.streamId == channel.streamId }
         val isNowFav: Boolean
         if (index >= 0) {
-            list.removeAt(index)
+            favChannelsCache.removeAt(index)
+            favChannelIds.remove(channel.streamId)
             isNowFav = false
         } else {
-            list.add(0, channel)
+            favChannelsCache.add(0, channel)
+            favChannelIds.add(channel.streamId)
             isNowFav = true
         }
-        saveChannels(KEY_FAV_CHANNELS, list)
+        saveChannels(KEY_FAV_CHANNELS, favChannelsCache)
         return isNowFav
     }
 
+    @Synchronized
     fun getRecentChannels(): List<LiveChannel> {
-        return loadChannels(KEY_RECENT_CHANNELS)
+        return recentChannelsCache.toList()
     }
 
     fun getCustomChannelName(streamId: Int): String? {
@@ -62,15 +94,16 @@ class FavoritesHistoryManager(context: Context) {
         prefs.edit().putString("custom_ch_name_$streamId", newName).apply()
     }
 
+    @Synchronized
     fun addChannelToRecent(channel: LiveChannel) {
-        val list = getRecentChannels().toMutableList()
-        list.removeAll { it.streamId == channel.streamId }
-        list.add(0, channel)
-        if (list.size > MAX_RECENT_ITEMS) {
-            saveChannels(KEY_RECENT_CHANNELS, list.take(MAX_RECENT_ITEMS))
-        } else {
-            saveChannels(KEY_RECENT_CHANNELS, list)
+        recentChannelsCache.removeAll { it.streamId == channel.streamId }
+        recentChannelsCache.add(0, channel)
+        if (recentChannelsCache.size > MAX_RECENT_ITEMS) {
+            val trimmed = recentChannelsCache.take(MAX_RECENT_ITEMS).toMutableList()
+            recentChannelsCache.clear()
+            recentChannelsCache.addAll(trimmed)
         }
+        saveChannels(KEY_RECENT_CHANNELS, recentChannelsCache)
     }
 
     private fun loadChannels(key: String): List<LiveChannel> {
@@ -118,42 +151,47 @@ class FavoritesHistoryManager(context: Context) {
     // ==========================================
     // MOVIES (VOD)
     // ==========================================
+    @Synchronized
     fun getFavoriteMovies(): List<VodMovie> {
-        return loadMovies(KEY_FAV_MOVIES)
+        return favMoviesCache.toList()
     }
 
     fun isMovieFavorite(streamId: Int): Boolean {
-        return getFavoriteMovies().any { it.streamId == streamId }
+        return favMovieIds.contains(streamId)
     }
 
+    @Synchronized
     fun toggleMovieFavorite(movie: VodMovie): Boolean {
-        val list = getFavoriteMovies().toMutableList()
-        val index = list.indexOfFirst { it.streamId == movie.streamId }
+        val index = favMoviesCache.indexOfFirst { it.streamId == movie.streamId }
         val isNowFav: Boolean
         if (index >= 0) {
-            list.removeAt(index)
+            favMoviesCache.removeAt(index)
+            favMovieIds.remove(movie.streamId)
             isNowFav = false
         } else {
-            list.add(0, movie)
+            favMoviesCache.add(0, movie)
+            favMovieIds.add(movie.streamId)
             isNowFav = true
         }
-        saveMovies(KEY_FAV_MOVIES, list)
+        saveMovies(KEY_FAV_MOVIES, favMoviesCache)
         return isNowFav
     }
 
+    @Synchronized
     fun getRecentMovies(): List<VodMovie> {
-        return loadMovies(KEY_RECENT_MOVIES)
+        return recentMoviesCache.toList()
     }
 
+    @Synchronized
     fun addMovieToRecent(movie: VodMovie) {
-        val list = getRecentMovies().toMutableList()
-        list.removeAll { it.streamId == movie.streamId }
-        list.add(0, movie)
-        if (list.size > MAX_RECENT_ITEMS) {
-            saveMovies(KEY_RECENT_MOVIES, list.take(MAX_RECENT_ITEMS))
-        } else {
-            saveMovies(KEY_RECENT_MOVIES, list)
+        recentMoviesCache.removeAll { it.streamId == movie.streamId }
+        recentMoviesCache.add(0, movie)
+        if (recentMoviesCache.size > MAX_RECENT_ITEMS) {
+            val trimmed = recentMoviesCache.take(MAX_RECENT_ITEMS).toMutableList()
+            recentMoviesCache.clear()
+            recentMoviesCache.addAll(trimmed)
         }
+        saveMovies(KEY_RECENT_MOVIES, recentMoviesCache)
     }
 
     private fun loadMovies(key: String): List<VodMovie> {
@@ -201,42 +239,47 @@ class FavoritesHistoryManager(context: Context) {
     // ==========================================
     // SERIES
     // ==========================================
+    @Synchronized
     fun getFavoriteSeries(): List<SeriesItem> {
-        return loadSeries(KEY_FAV_SERIES)
+        return favSeriesCache.toList()
     }
 
     fun isSeriesFavorite(seriesId: Int): Boolean {
-        return getFavoriteSeries().any { it.seriesId == seriesId }
+        return favSeriesIds.contains(seriesId)
     }
 
+    @Synchronized
     fun toggleSeriesFavorite(series: SeriesItem): Boolean {
-        val list = getFavoriteSeries().toMutableList()
-        val index = list.indexOfFirst { it.seriesId == series.seriesId }
+        val index = favSeriesCache.indexOfFirst { it.seriesId == series.seriesId }
         val isNowFav: Boolean
         if (index >= 0) {
-            list.removeAt(index)
+            favSeriesCache.removeAt(index)
+            favSeriesIds.remove(series.seriesId)
             isNowFav = false
         } else {
-            list.add(0, series)
+            favSeriesCache.add(0, series)
+            favSeriesIds.add(series.seriesId)
             isNowFav = true
         }
-        saveSeries(KEY_FAV_SERIES, list)
+        saveSeries(KEY_FAV_SERIES, favSeriesCache)
         return isNowFav
     }
 
+    @Synchronized
     fun getRecentSeries(): List<SeriesItem> {
-        return loadSeries(KEY_RECENT_SERIES)
+        return recentSeriesCache.toList()
     }
 
+    @Synchronized
     fun addSeriesToRecent(series: SeriesItem) {
-        val list = getRecentSeries().toMutableList()
-        list.removeAll { it.seriesId == series.seriesId }
-        list.add(0, series)
-        if (list.size > MAX_RECENT_ITEMS) {
-            saveSeries(KEY_RECENT_SERIES, list.take(MAX_RECENT_ITEMS))
-        } else {
-            saveSeries(KEY_RECENT_SERIES, list)
+        recentSeriesCache.removeAll { it.seriesId == series.seriesId }
+        recentSeriesCache.add(0, series)
+        if (recentSeriesCache.size > MAX_RECENT_ITEMS) {
+            val trimmed = recentSeriesCache.take(MAX_RECENT_ITEMS).toMutableList()
+            recentSeriesCache.clear()
+            recentSeriesCache.addAll(trimmed)
         }
+        saveSeries(KEY_RECENT_SERIES, recentSeriesCache)
     }
 
     private fun loadSeries(key: String): List<SeriesItem> {
@@ -252,10 +295,7 @@ class FavoritesHistoryManager(context: Context) {
                         name = obj.getString("name"),
                         cover = obj.optString("cover", null),
                         rating = obj.optString("rating", null),
-                        categoryId = obj.optString("categoryId", null),
-                        plot = obj.optString("plot", null),
-                        genre = obj.optString("genre", null),
-                        releaseDate = obj.optString("releaseDate", null)
+                        categoryId = obj.optString("categoryId", null)
                     )
                 )
             }
@@ -274,9 +314,6 @@ class FavoritesHistoryManager(context: Context) {
                 put("cover", item.cover ?: "")
                 put("rating", item.rating ?: "")
                 put("categoryId", item.categoryId ?: "")
-                put("plot", item.plot ?: "")
-                put("genre", item.genre ?: "")
-                put("releaseDate", item.releaseDate ?: "")
             }
             array.put(obj)
         }

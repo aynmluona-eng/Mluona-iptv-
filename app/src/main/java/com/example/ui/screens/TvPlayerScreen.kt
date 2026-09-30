@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -62,6 +63,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,7 +103,9 @@ import com.example.ui.theme.TvSurfaceHighlight
 import com.example.ui.theme.TvTextMuted
 import com.example.ui.theme.TvTextPrimary
 import com.example.ui.theme.TvTextSecondary
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -125,6 +129,7 @@ fun TvPlayerScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     val currentLiveChannel by (viewModel?.selectedLiveChannel ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
 
@@ -137,7 +142,7 @@ fun TvPlayerScreen(
         streamUrl
     }
 
-    // Double-click OK detection state
+    // Double-click OK detection state (for VOD play/pause)
     var lastOkPressTime by remember { mutableLongStateOf(0L) }
     val doubleClickThreshold = 400L
 
@@ -149,7 +154,28 @@ fun TvPlayerScreen(
     var currentPositionMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
 
-    // Playback Speed (0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2.0x)
+    // Live TV Receiver-style states
+    var liveOverlayVisible by remember { mutableStateOf(true) }
+    var numberInputBuffer by remember { mutableStateOf("") }
+    var autoHideJob by remember { mutableStateOf<Job?>(null) }
+    var numberTuneJob by remember { mutableStateOf<Job?>(null) }
+
+    fun showLiveReceiverBanner() {
+        liveOverlayVisible = true
+        autoHideJob?.cancel()
+        autoHideJob = coroutineScope.launch {
+            delay(3500)
+            liveOverlayVisible = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (isLive) {
+            showLiveReceiverBanner()
+        }
+    }
+
+    // Playback Speed (0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2.0x) for Movies
     val speedOptions = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
     var currentSpeedIndex by remember { mutableIntStateOf(2) } // default 1.0f
 
@@ -173,16 +199,16 @@ fun TvPlayerScreen(
         }
     }
 
-    // Auto-hide controls & bottom details
-    LaunchedEffect(showControls, isPlaying) {
-        if (showControls && isPlaying) {
+    // Auto-hide controls & bottom details for VOD
+    LaunchedEffect(showControls, isPlaying, isLive) {
+        if (!isLive && showControls && isPlaying) {
             delay(5000)
             showControls = false
         }
     }
 
-    LaunchedEffect(showBottomDetails) {
-        if (showBottomDetails) {
+    LaunchedEffect(showBottomDetails, isLive) {
+        if (!isLive && showBottomDetails) {
             delay(7000)
             showBottomDetails = false
         }
@@ -200,6 +226,9 @@ fun TvPlayerScreen(
             isBuffering = true
             showBottomDetails = true
             showControls = true
+            if (isLive) {
+                showLiveReceiverBanner()
+            }
         }
     }
 
@@ -308,7 +337,7 @@ fun TvPlayerScreen(
         }
     }
 
-    // Periodic time update (only for VOD / Movies when controls are visible, avoiding live TV overhead)
+    // Periodic time update (only for VOD / Movies when controls are visible)
     LaunchedEffect(isPlaying, isLive, showControls) {
         if (!isLive && isPlaying && showControls) {
             while (isPlaying && showControls) {
@@ -321,7 +350,12 @@ fun TvPlayerScreen(
 
     // Handle Remote Back key directly: close channel and exit player immediately
     BackHandler {
-        onBack()
+        if (isLive && numberInputBuffer.isNotEmpty()) {
+            numberTuneJob?.cancel()
+            numberInputBuffer = ""
+        } else {
+            onBack()
+        }
     }
 
     val focusRequester = remember { FocusRequester() }
@@ -340,105 +374,162 @@ fun TvPlayerScreen(
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     val keyCode = keyEvent.nativeKeyEvent.keyCode
 
-                    when (keyCode) {
-                        // Remote Back / Exit Button: Close channel immediately and return to list
-                        KeyEvent.KEYCODE_BACK,
-                        KeyEvent.KEYCODE_ESCAPE,
-                        KeyEvent.KEYCODE_WINDOW -> {
-                            onBack()
-                            true
-                        }
-
-                        // OK / DPAD_CENTER: Single press opens bottom OSD; Double press toggles Play/Pause
-                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                            val now = System.currentTimeMillis()
-                            if (now - lastOkPressTime < doubleClickThreshold) {
-                                // Double click detected: Pause / Play
-                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                lastOkPressTime = 0L
-                            } else {
-                                // First click: schedule single click to show bottom details
-                                lastOkPressTime = now
-                                showBottomDetails = !showBottomDetails
-                                showControls = true
+                    if (isLive) {
+                        // Live TV: Receiver Behavior
+                        when (keyCode) {
+                            // Back button: clear number buffer or return
+                            KeyEvent.KEYCODE_BACK,
+                            KeyEvent.KEYCODE_ESCAPE,
+                            KeyEvent.KEYCODE_WINDOW -> {
+                                if (numberInputBuffer.isNotEmpty()) {
+                                    numberTuneJob?.cancel()
+                                    numberInputBuffer = ""
+                                    true
+                                } else {
+                                    onBack()
+                                    true
+                                }
                             }
-                            true
-                        }
 
-                        // Fast Seek with D-Pad Left / Right (for Movies & Series)
-                        KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            if (!isLive) {
+                            // OK / DPAD_CENTER: Tune immediately if buffer exists, or toggle receiver banner
+                            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                if (numberInputBuffer.isNotEmpty()) {
+                                    numberTuneJob?.cancel()
+                                    val num = numberInputBuffer.toIntOrNull()
+                                    if (num != null && viewModel != null) {
+                                        viewModel.playChannelByNumber(num)
+                                    }
+                                    numberInputBuffer = ""
+                                    showLiveReceiverBanner()
+                                } else {
+                                    if (liveOverlayVisible) {
+                                        liveOverlayVisible = false
+                                    } else {
+                                        showLiveReceiverBanner()
+                                    }
+                                }
+                                true
+                            }
+
+                            // CH+ / Page Up / D-pad Up: Next channel
+                            KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_DPAD_UP -> {
+                                if (viewModel != null) {
+                                    viewModel.playNextLiveChannel()
+                                    showLiveReceiverBanner()
+                                }
+                                true
+                            }
+
+                            // CH- / Page Down / D-pad Down: Previous channel
+                            KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                if (viewModel != null) {
+                                    viewModel.playPreviousLiveChannel()
+                                    showLiveReceiverBanner()
+                                }
+                                true
+                            }
+
+                            // Number keys: 0 to 9 on TV remote
+                            KeyEvent.KEYCODE_0, KeyEvent.KEYCODE_1, KeyEvent.KEYCODE_2, KeyEvent.KEYCODE_3, KeyEvent.KEYCODE_4,
+                            KeyEvent.KEYCODE_5, KeyEvent.KEYCODE_6, KeyEvent.KEYCODE_7, KeyEvent.KEYCODE_8, KeyEvent.KEYCODE_9,
+                            KeyEvent.KEYCODE_NUMPAD_0, KeyEvent.KEYCODE_NUMPAD_1, KeyEvent.KEYCODE_NUMPAD_2, KeyEvent.KEYCODE_NUMPAD_3,
+                            KeyEvent.KEYCODE_NUMPAD_4, KeyEvent.KEYCODE_NUMPAD_5, KeyEvent.KEYCODE_NUMPAD_6, KeyEvent.KEYCODE_NUMPAD_7,
+                            KeyEvent.KEYCODE_NUMPAD_8, KeyEvent.KEYCODE_NUMPAD_9 -> {
+                                val digit = when (keyCode) {
+                                    in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> (keyCode - KeyEvent.KEYCODE_0).toString()
+                                    in KeyEvent.KEYCODE_NUMPAD_0..KeyEvent.KEYCODE_NUMPAD_9 -> (keyCode - KeyEvent.KEYCODE_NUMPAD_0).toString()
+                                    else -> ""
+                                }
+                                if (digit.isNotEmpty() && numberInputBuffer.length < 5) {
+                                    numberInputBuffer += digit
+                                    liveOverlayVisible = true
+                                    numberTuneJob?.cancel()
+                                    numberTuneJob = coroutineScope.launch {
+                                        delay(1200)
+                                        val targetNum = numberInputBuffer.toIntOrNull()
+                                        if (targetNum != null && viewModel != null) {
+                                            viewModel.playChannelByNumber(targetNum)
+                                        }
+                                        numberInputBuffer = ""
+                                        showLiveReceiverBanner()
+                                    }
+                                }
+                                true
+                            }
+
+                            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                true
+                            }
+                            KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                                exoPlayer.play()
+                                true
+                            }
+                            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                                exoPlayer.pause()
+                                true
+                            }
+                            else -> false
+                        }
+                    } else {
+                        // VOD / Movies / Series
+                        when (keyCode) {
+                            KeyEvent.KEYCODE_BACK,
+                            KeyEvent.KEYCODE_ESCAPE,
+                            KeyEvent.KEYCODE_WINDOW -> {
+                                onBack()
+                                true
+                            }
+
+                            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                val now = System.currentTimeMillis()
+                                if (now - lastOkPressTime < doubleClickThreshold) {
+                                    if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                    lastOkPressTime = 0L
+                                } else {
+                                    lastOkPressTime = now
+                                    showBottomDetails = !showBottomDetails
+                                    showControls = true
+                                }
+                                true
+                            }
+
+                            KeyEvent.KEYCODE_DPAD_LEFT -> {
                                 val newPos = (exoPlayer.currentPosition - 10000).coerceAtLeast(0L)
                                 exoPlayer.seekTo(newPos)
                                 showControls = true
                                 true
-                            } else {
-                                false
                             }
-                        }
-                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (!isLive) {
+                            KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                 val newPos = (exoPlayer.currentPosition + 10000).coerceAtMost(durationMs)
                                 exoPlayer.seekTo(newPos)
                                 showControls = true
                                 true
-                            } else {
-                                false
                             }
-                        }
-                        // Channel Zap: CH+ / CH- (Remote control keycodes & Page Up/Down)
-                        KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
-                            if (isLive && viewModel != null) {
-                                val nextCh = viewModel.playNextLiveChannel()
-                                if (nextCh != null) {
-                                    showBottomDetails = true
-                                    showControls = true
-                                }
+                            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
                                 true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
-                            if (isLive && viewModel != null) {
-                                val prevCh = viewModel.playPreviousLiveChannel()
-                                if (prevCh != null) {
-                                    showBottomDetails = true
-                                    showControls = true
-                                }
+                            }
+                            KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                                exoPlayer.play()
                                 true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            showControls = true
-                            showBottomDetails = true
-                            true
-                        }
-                        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                            true
-                        }
-                        KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                            exoPlayer.play()
-                            true
-                        }
-                        KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                            exoPlayer.pause()
-                            true
-                        }
-                        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                            if (!isLive) {
+                            }
+                            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                                exoPlayer.pause()
+                                true
+                            }
+                            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
                                 exoPlayer.seekTo((exoPlayer.currentPosition + 15000).coerceAtMost(durationMs))
                                 showControls = true
                                 true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                            if (!isLive) {
+                            }
+                            KeyEvent.KEYCODE_MEDIA_REWIND -> {
                                 exoPlayer.seekTo((exoPlayer.currentPosition - 15000).coerceAtLeast(0L))
                                 showControls = true
                                 true
-                            } else false
+                            }
+                            else -> false
                         }
-                        else -> false
                     }
                 } else {
                     false
@@ -448,14 +539,22 @@ fun TvPlayerScreen(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) {
-                val now = System.currentTimeMillis()
-                if (now - lastOkPressTime < doubleClickThreshold) {
-                    if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                    lastOkPressTime = 0L
+                if (isLive) {
+                    if (liveOverlayVisible) {
+                        liveOverlayVisible = false
+                    } else {
+                        showLiveReceiverBanner()
+                    }
                 } else {
-                    lastOkPressTime = now
-                    showControls = !showControls
-                    if (showControls) showBottomDetails = true
+                    val now = System.currentTimeMillis()
+                    if (now - lastOkPressTime < doubleClickThreshold) {
+                        if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                        lastOkPressTime = 0L
+                    } else {
+                        lastOkPressTime = now
+                        showControls = !showControls
+                        if (showControls) showBottomDetails = true
+                    }
                 }
             }
             .testTag("tv_player_screen")
@@ -490,7 +589,7 @@ fun TvPlayerScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     CircularProgressIndicator(
-                        color = TvAccentGold,
+                        color = Color(0xFF00E676),
                         modifier = Modifier.size(52.dp),
                         strokeWidth = 3.dp
                     )
@@ -529,7 +628,7 @@ fun TvPlayerScreen(
                             .onFocusChanged { isRetryFocused = it.isFocused }
                             .focusable()
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isRetryFocused) TvAccentGold else TvAccentGold.copy(alpha = 0.85f))
+                            .background(if (isRetryFocused) Color(0xFF00E676) else Color(0xFF00E676).copy(alpha = 0.85f))
                             .border(
                                 width = if (isRetryFocused) 2.dp else 0.dp,
                                 color = if (isRetryFocused) Color.White else Color.Transparent,
@@ -547,7 +646,7 @@ fun TvPlayerScreen(
                     ) {
                         Text(
                             text = "إعادة المحاولة",
-                            color = TvBackground,
+                            color = Color.Black,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
@@ -556,62 +655,201 @@ fun TvPlayerScreen(
             }
         }
 
-        // Top Header Bar: Back button (Top Left) & Aspect Ratio/Zoom (Top Right)
-        AnimatedVisibility(
-            visible = showControls,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter)
-        ) {
-            Box(
+        // =========================================================================
+        // LIVE TV OVERLAY (RECEIVER STYLE: Simple, top right back, center bottom bar)
+        // =========================================================================
+        if (isLive) {
+            // 1. Top Right Back Button ("وخيار الرجوع في اعلى اليمين")
+            AnimatedVisibility(
+                visible = liveOverlayVisible,
+                enter = fadeIn(),
+                exit = fadeOut(),
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Black.copy(alpha = 0.88f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-                    .padding(horizontal = 24.dp, vertical = 18.dp)
+                    .align(Alignment.TopEnd)
+                    .padding(top = 24.dp, end = 24.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                val backSource = remember { MutableInteractionSource() }
+                val isBackFocused by backSource.collectIsFocusedAsState()
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isBackFocused) Color(0xFF00E676) else Color.Black.copy(alpha = 0.55f))
+                        .border(
+                            width = 1.dp,
+                            color = if (isBackFocused) Color.White else Color.White.copy(alpha = 0.25f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable(interactionSource = backSource, indication = null) {
+                            onBack()
+                        }
+                        .focusable(interactionSource = backSource)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .testTag("btn_live_back_top_right"),
+                    contentAlignment = Alignment.Center
                 ) {
-                    // Top Left: Back Button + Title
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        val backSource = remember { MutableInteractionSource() }
-                        val isBackFocused by backSource.collectIsFocusedAsState()
+                        Text(
+                            text = "رجوع",
+                            color = if (isBackFocused) Color.Black else Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "رجوع",
+                            tint = if (isBackFocused) Color.Black else Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
 
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(if (isBackFocused) TvAccentGold else TvSurface.copy(alpha = 0.85f))
-                                .border(1.dp, if (isBackFocused) TvAccentGold else TvBorder, CircleShape)
-                                .clickable(
-                                    interactionSource = backSource,
-                                    indication = null
-                                ) { onBack() }
-                                .focusable(interactionSource = backSource)
-                                .testTag("btn_player_back"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "رجوع",
-                                tint = if (isBackFocused) TvBackground else TvTextPrimary,
-                                modifier = Modifier.size(22.dp)
-                            )
+            // 2. Channel Number Input Indicator (when typing digits on remote: e.g. "12")
+            if (numberInputBuffer.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 28.dp, top = 24.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.8f))
+                        .border(1.5.dp, Color(0xFF00E676), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "CH: $numberInputBuffer -",
+                        color = Color(0xFF00E676),
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
+
+            // 3. Small semi-transparent center bottom bar containing channel number and name merged
+            // ("بالنسبة للشريط السفلي للمشغل ادمج معه رقم قناة")
+            val liveChannelsList by (viewModel?.liveChannels ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsState()
+            val computedIndex = remember(currentLiveChannel, liveChannelsList) {
+                val idx = liveChannelsList.indexOfFirst { it.streamId == currentLiveChannel?.streamId }
+                if (idx >= 0) idx + 1 else null
+            }
+            val displayChannelNum = currentChannelNumber ?: computedIndex
+
+            AnimatedVisibility(
+                visible = liveOverlayVisible,
+                enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 28.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .wrapContentWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.Black.copy(alpha = 0.60f))
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.22f),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                        .testTag("live_receiver_channel_bar")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (displayChannelNum != null && displayChannelNum > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF00E676).copy(alpha = 0.22f))
+                                    .border(1.dp, Color(0xFF00E676).copy(alpha = 0.8f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "$displayChannelNum",
+                                    color = Color(0xFF00E676),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                         }
+                        Text(
+                            text = currentTitle,
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
 
-                        Column {
+        // =========================================================================
+        // VOD / MOVIES / SERIES OVERLAYS (Full controls, seekbar, speed, etc.)
+        // =========================================================================
+        if (!isLive) {
+            // Top Header Bar: Back button (Top Left) & Aspect Ratio/Zoom (Top Right)
+            AnimatedVisibility(
+                visible = showControls,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.88f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                        .padding(horizontal = 24.dp, vertical = 18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // Top Left: Back Button + Title
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            val backSource = remember { MutableInteractionSource() }
+                            val isBackFocused by backSource.collectIsFocusedAsState()
+
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isBackFocused) TvAccentGold else TvSurface.copy(alpha = 0.85f))
+                                    .border(1.dp, if (isBackFocused) TvAccentGold else TvBorder, CircleShape)
+                                    .clickable(
+                                        interactionSource = backSource,
+                                        indication = null
+                                    ) { onBack() }
+                                    .focusable(interactionSource = backSource)
+                                    .testTag("btn_player_back"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "رجوع",
+                                    tint = if (isBackFocused) TvBackground else TvTextPrimary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
                             Text(
                                 text = currentTitle,
                                 color = TvTextPrimary,
@@ -620,42 +858,13 @@ fun TvPlayerScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            if (isLive) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFE53935))
-                                    )
-                                    Text(
-                                        text = "LIVE TV",
-                                        color = Color(0xFFE53935),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    if (currentTimeString.isNotEmpty()) {
-                                        Text(
-                                            text = "• $currentTimeString",
-                                            color = TvTextSecondary,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-                            }
                         }
-                    }
 
-                    // Top Right: Zoom / Aspect Ratio button & Speed selector (for VOD/Series)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Playback Speed button (Movies & Series)
-                        if (!isLive) {
+                        // Top Right: Zoom & Speed selector
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
                             val speedSource = remember { MutableInteractionSource() }
                             val isSpeedFocused by speedSource.collectIsFocusedAsState()
 
@@ -693,215 +902,61 @@ fun TvPlayerScreen(
                                     )
                                 }
                             }
-                        }
 
-                        // Zoom / Aspect Ratio in Right Corner (Fit, Fill, Zoom)
-                        val zoomSource = remember { MutableInteractionSource() }
-                        val isZoomFocused by zoomSource.collectIsFocusedAsState()
+                            val zoomSource = remember { MutableInteractionSource() }
+                            val isZoomFocused by zoomSource.collectIsFocusedAsState()
 
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isZoomFocused) TvAccentGold else TvSurface.copy(alpha = 0.85f))
-                                .border(1.dp, if (isZoomFocused) TvAccentGold else TvBorder, RoundedCornerShape(8.dp))
-                                .clickable(
-                                    interactionSource = zoomSource,
-                                    indication = null
-                                ) {
-                                    currentResizeModeIndex = (currentResizeModeIndex + 1) % resizeModes.size
-                                }
-                                .focusable(interactionSource = zoomSource)
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                                .testTag("btn_player_zoom"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isZoomFocused) TvAccentGold else TvSurface.copy(alpha = 0.85f))
+                                    .border(1.dp, if (isZoomFocused) TvAccentGold else TvBorder, RoundedCornerShape(8.dp))
+                                    .clickable(
+                                        interactionSource = zoomSource,
+                                        indication = null
+                                    ) {
+                                        currentResizeModeIndex = (currentResizeModeIndex + 1) % resizeModes.size
+                                    }
+                                    .focusable(interactionSource = zoomSource)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .testTag("btn_player_zoom"),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.AspectRatio,
-                                    contentDescription = "تكبير الشاشة",
-                                    tint = if (isZoomFocused) TvBackground else TvAccentGold,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = resizeModes[currentResizeModeIndex].label,
-                                    color = if (isZoomFocused) TvBackground else TvTextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AspectRatio,
+                                        contentDescription = "تكبير الشاشة",
+                                        tint = if (isZoomFocused) TvBackground else TvAccentGold,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = resizeModes[currentResizeModeIndex].label,
+                                        color = if (isZoomFocused) TvBackground else TvTextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // Compact Dynamic Bottom Controls Bar (Slim floating pill)
-        AnimatedVisibility(
-            visible = showBottomDetails,
-            enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 14.dp)
+            // Compact Dynamic Bottom Controls Bar for VOD
+            AnimatedVisibility(
+                visible = showBottomDetails,
+                enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                if (isLive) {
-                    // LIVE TV: Single compact floating glass pill (~48dp high)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xE60F141D))
-                            .border(1.dp, Color(0xFF263345), RoundedCornerShape(14.dp))
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            // Left: Live badge, channel number, name, and EPG
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFFE53935))
-                                        .padding(horizontal = 7.dp, vertical = 3.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(6.dp)
-                                                .clip(CircleShape)
-                                                .background(Color.White)
-                                        )
-                                        Text(
-                                            text = "LIVE",
-                                            color = Color.White,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Black
-                                        )
-                                    }
-                                }
-
-                                if (currentChannelNumber != null && currentChannelNumber > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(TvAccentGold.copy(alpha = 0.2f))
-                                            .border(1.dp, TvAccentGold.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = "CH $currentChannelNumber",
-                                            color = TvAccentGold,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-
-                                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                                    Text(
-                                        text = currentTitle,
-                                        color = TvTextPrimary,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    val epg = currentEpgInfo ?: "البث المباشر"
-                                    Text(
-                                        text = epg,
-                                        color = TvAccentGold,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-
-                            // Center: Dynamic Audio / Stream Equalizer
-                            DynamicAudioVisualizer(isPlaying = isPlaying)
-
-                            Spacer(modifier = Modifier.width(14.dp))
-
-                            // Right: Format badge, Clock, and Compact Play/Pause
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(Color(0xFF1E2633))
-                                        .padding(horizontal = 6.dp, vertical = 3.dp)
-                                ) {
-                                    Text(
-                                        text = "HD • TS",
-                                        color = TvTextSecondary,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                if (currentTimeString.isNotEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(Color(0xFF1B222C))
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            text = currentTimeString,
-                                            color = TvTextPrimary,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-
-                                // Compact Play/Pause
-                                val playBtnSource = remember { MutableInteractionSource() }
-                                val isPlayBtnFocused by playBtnSource.collectIsFocusedAsState()
-                                Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isPlayBtnFocused) Color(0xFFFFD54F) else TvAccentGold)
-                                        .border(2.dp, if (isPlayBtnFocused) Color.White else Color.Transparent, CircleShape)
-                                        .clickable(interactionSource = playBtnSource, indication = null) {
-                                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                        }
-                                        .focusable(interactionSource = playBtnSource)
-                                        .testTag("btn_player_toggle_play"),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = if (isPlaying) "إيقاف مؤقت" else "تشغيل",
-                                        tint = TvBackground,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // VOD / SERIES: Compact floating glass capsule (~64dp high)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 14.dp)
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -914,7 +969,6 @@ fun TvPlayerScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
-                            // Slim progress line
                             if (durationMs > 0) {
                                 var sliderPosition by remember { mutableFloatStateOf(0f) }
                                 var isDragging by remember { mutableStateOf(false) }
@@ -963,13 +1017,11 @@ fun TvPlayerScreen(
                                 }
                             }
 
-                            // Controls Row
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                // Title
                                 Text(
                                     text = currentTitle,
                                     color = TvTextPrimary,
@@ -980,7 +1032,6 @@ fun TvPlayerScreen(
                                     modifier = Modifier.weight(1f)
                                 )
 
-                                // Playback Controls: Rewind 10, Play/Pause, Forward 10
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1005,11 +1056,11 @@ fun TvPlayerScreen(
                                             .clip(CircleShape)
                                             .background(if (isPlayBtnFocused) Color(0xFFFFD54F) else TvAccentGold)
                                             .border(2.dp, if (isPlayBtnFocused) Color.White else Color.Transparent, CircleShape)
-                                        .clickable(interactionSource = playBtnSource, indication = null) {
-                                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                        }
-                                        .focusable(interactionSource = playBtnSource)
-                                        .testTag("btn_player_toggle_play"),
+                                            .clickable(interactionSource = playBtnSource, indication = null) {
+                                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                            }
+                                            .focusable(interactionSource = playBtnSource)
+                                            .testTag("btn_player_toggle_play"),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
@@ -1032,7 +1083,6 @@ fun TvPlayerScreen(
                                     )
                                 }
 
-                                // Visualizer & clock on the right
                                 Row(
                                     modifier = Modifier.weight(1f),
                                     horizontalArrangement = Arrangement.End,

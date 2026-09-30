@@ -4,8 +4,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -17,7 +15,9 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.SeriesItem
 import com.example.data.model.VodMovie
+import com.example.ui.screens.ContentLoadingScreen
 import com.example.ui.screens.LiveTvScreen
+import com.example.ui.screens.LoadingCategoryType
 import com.example.ui.screens.M3uLoadScreen
 import com.example.ui.screens.MovieDetailScreen
 import com.example.ui.screens.MoviesScreen
@@ -41,6 +41,7 @@ enum class TvScreen {
   M3U_LOAD,
   SAVED_ACCOUNTS,
   DASHBOARD,
+  LOADING_CONTENT,
   LIVE_TV,
   MOVIES,
   MOVIE_DETAIL,
@@ -74,6 +75,8 @@ fun MluonaTvApp(
   viewModel: IptvViewModel = viewModel()
 ) {
   var currentScreen by remember { mutableStateOf(TvScreen.SPLASH) }
+  var loadingCategoryType by remember { mutableStateOf(LoadingCategoryType.LIVE_TV) }
+
   var playerTitle by remember { mutableStateOf("البث المباشر") }
   var playerUrl by remember { mutableStateOf("") }
   var isPlayerLive by remember { mutableStateOf(false) }
@@ -87,16 +90,13 @@ fun MluonaTvApp(
   var selectedMovieForDetail by remember { mutableStateOf<VodMovie?>(null) }
   var selectedSeriesForDetail by remember { mutableStateOf<SeriesItem?>(null) }
 
-  // Direct instant screen rendering (no overlapping transitions to keep TV RAM and CPU completely free)
+  // Direct instant screen rendering
   when (currentScreen) {
       TvScreen.SPLASH -> {
         SplashScreen(
           onSplashComplete = {
-            if (viewModel.activeAccount.value != null) {
-              currentScreen = TvScreen.DASHBOARD
-            } else {
-              currentScreen = TvScreen.PORTAL
-            }
+            // NEVER show portal after splash - ALWAYS go directly to Dashboard
+            currentScreen = TvScreen.DASHBOARD
           }
         )
       }
@@ -116,7 +116,7 @@ fun MluonaTvApp(
             currentScreen = TvScreen.SAVED_ACCOUNTS
           },
           onBackToSplash = {
-            currentScreen = TvScreen.SPLASH
+            currentScreen = TvScreen.DASHBOARD
           }
         )
       }
@@ -152,11 +152,7 @@ fun MluonaTvApp(
             currentScreen = TvScreen.PORTAL
           },
           onBack = {
-            if (viewModel.activeAccount.value != null) {
-              currentScreen = TvScreen.DASHBOARD
-            } else {
-              currentScreen = TvScreen.PORTAL
-            }
+            currentScreen = TvScreen.DASHBOARD
           }
         )
       }
@@ -164,13 +160,16 @@ fun MluonaTvApp(
         TvDashboardScreen(
           viewModel = viewModel,
           onNavigateToLiveTv = {
-            currentScreen = TvScreen.LIVE_TV
+            loadingCategoryType = LoadingCategoryType.LIVE_TV
+            currentScreen = TvScreen.LOADING_CONTENT
           },
           onNavigateToMovies = {
-            currentScreen = TvScreen.MOVIES
+            loadingCategoryType = LoadingCategoryType.FILMS
+            currentScreen = TvScreen.LOADING_CONTENT
           },
           onNavigateToSeries = {
-            currentScreen = TvScreen.SERIES
+            loadingCategoryType = LoadingCategoryType.SERIES
+            currentScreen = TvScreen.LOADING_CONTENT
           },
           onNavigateToUsers = {
             currentScreen = TvScreen.SAVED_ACCOUNTS
@@ -179,7 +178,20 @@ fun MluonaTvApp(
             currentScreen = TvScreen.SETTINGS
           },
           onBack = {
-            currentScreen = TvScreen.PORTAL
+            // Stay on Dashboard
+          }
+        )
+      }
+      TvScreen.LOADING_CONTENT -> {
+        ContentLoadingScreen(
+          type = loadingCategoryType,
+          viewModel = viewModel,
+          onLoaded = {
+            currentScreen = when (loadingCategoryType) {
+              LoadingCategoryType.LIVE_TV -> TvScreen.LIVE_TV
+              LoadingCategoryType.FILMS -> TvScreen.MOVIES
+              LoadingCategoryType.SERIES -> TvScreen.SERIES
+            }
           }
         )
       }
@@ -223,15 +235,14 @@ fun MluonaTvApp(
             movie = movie,
             viewModel = viewModel,
             onPlayMovie = { vodDetail ->
-              val streamUrl = viewModel.getVodStreamUrlFromId(vodDetail.streamId, vodDetail.containerExtension)
-                ?: viewModel.getVodStreamUrl(movie)
+              val streamUrl = viewModel.getVodStreamUrl(movie) ?: viewModel.getVodStreamUrlFromId(vodDetail.streamId, vodDetail.containerExtension)
               if (!streamUrl.isNullOrBlank()) {
                 playerTitle = vodDetail.name
                 playerUrl = streamUrl
                 isPlayerLive = false
                 playerChannelNumber = null
-                playerEpgInfo = vodDetail.genre ?: "فيلم سينمائي"
-                playerFrequencyInfo = "${vodDetail.containerExtension.uppercase()} • 1080p"
+                playerEpgInfo = "فيلم • VOD • ${vodDetail.containerExtension.uppercase()}"
+                playerFrequencyInfo = "1080p FHD"
                 previousScreenBeforePlayer = TvScreen.MOVIE_DETAIL
                 currentScreen = TvScreen.PLAYER
               }
@@ -247,8 +258,8 @@ fun MluonaTvApp(
       TvScreen.SERIES -> {
         SeriesScreen(
           viewModel = viewModel,
-          onSelectSeries = { seriesItem ->
-            selectedSeriesForDetail = seriesItem
+          onSelectSeries = { series ->
+            selectedSeriesForDetail = series
             currentScreen = TvScreen.SERIES_DETAIL
           },
           onBack = {
@@ -264,14 +275,13 @@ fun MluonaTvApp(
             viewModel = viewModel,
             onPlayEpisode = { episode, seriesTitle ->
               val streamUrl = viewModel.getEpisodeStreamUrl(episode.id, episode.containerExtension)
-                ?: viewModel.getSeriesStreamUrl(series)
               if (!streamUrl.isNullOrBlank()) {
                 playerTitle = "$seriesTitle - ${episode.title}"
                 playerUrl = streamUrl
                 isPlayerLive = false
                 playerChannelNumber = null
-                playerEpgInfo = "الموسم ${episode.season} • الحلقة ${episode.episodeNum}"
-                playerFrequencyInfo = "${episode.containerExtension.uppercase()} • FHD"
+                playerEpgInfo = "حلقة مسلسل • Series Episode"
+                playerFrequencyInfo = "1080p FHD"
                 previousScreenBeforePlayer = TvScreen.SERIES_DETAIL
                 currentScreen = TvScreen.PLAYER
               }
@@ -306,5 +316,5 @@ fun MluonaTvApp(
           }
         )
       }
-    }
+  }
 }

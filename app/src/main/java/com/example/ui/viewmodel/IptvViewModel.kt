@@ -345,6 +345,14 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             _isLoading.value = false
+
+            // Preload VOD and Series in background so remote navigation from Dashboard is instantaneous
+            launch {
+                loadVodContentIfNeeded(forceRefresh = false)
+            }
+            launch {
+                loadSeriesContentIfNeeded(forceRefresh = false)
+            }
         }
     }
 
@@ -603,6 +611,19 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         val prevChannel = list[prevIndex]
         _selectedLiveChannel.value = prevChannel
         return prevChannel
+    }
+
+    fun playChannelByNumber(number: Int): LiveChannel? {
+        val list = _liveChannels.value
+        if (list.isEmpty()) return null
+        val matched = list.firstOrNull { it.num == number }
+            ?: list.getOrNull(number - 1)
+            ?: list.firstOrNull { it.streamId == number }
+        if (matched != null) {
+            _selectedLiveChannel.value = matched
+            return matched
+        }
+        return null
     }
 
     private fun loadLiveChannelsForCategory(session: AccountSession, categoryId: String?) {

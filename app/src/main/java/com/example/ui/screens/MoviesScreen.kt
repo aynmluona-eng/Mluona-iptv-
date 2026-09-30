@@ -26,18 +26,17 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,9 +46,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,15 +58,13 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.VodCategory
 import com.example.data.model.VodMovie
-import com.example.ui.theme.TvAccentGold
-import com.example.ui.theme.TvBackground
-import com.example.ui.theme.TvBorder
-import com.example.ui.theme.TvSurface
-import com.example.ui.theme.TvSurfaceHighlight
-import com.example.ui.theme.TvTextMuted
-import com.example.ui.theme.TvTextPrimary
-import com.example.ui.theme.TvTextSecondary
 import com.example.ui.viewmodel.IptvViewModel
+
+private val ColorThemeNeonGreen = Color(0xFF00E676)
+private val ColorThemeDarkBg = Color(0xFF050B08)
+private val ColorThemeSurface = Color(0xFF0C1611)
+private val ColorThemeSurfaceFocused = Color(0xFF0A2216)
+private val ColorThemeBorder = Color(0xFF14271E)
 
 @Composable
 fun MoviesScreen(
@@ -82,214 +81,227 @@ fun MoviesScreen(
     val isVodLoading by viewModel.isVodLoading.collectAsState()
     val selectedCategory by viewModel.selectedVodCategory.collectAsState()
 
-    // Load VOD categories and initial category on-demand
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    var searchQuery by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
         viewModel.loadVodContentIfNeeded()
+    }
+
+    val displayedMovies = remember(movies, searchQuery) {
+        if (searchQuery.isBlank()) {
+            movies
+        } else {
+            movies.filter { it.name.contains(searchQuery, ignoreCase = true) }
+        }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(TvBackground)
-            .padding(horizontal = 32.dp, vertical = 20.dp)
+            .background(ColorThemeDarkBg)
+            .padding(horizontal = 24.dp, vertical = 14.dp)
             .testTag("movies_screen")
     ) {
-        Column(
+        Row(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // LEFT SIDEBAR (Back + Search + Categories)
+            Column(
+                modifier = Modifier
+                    .width(260.dp)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                // Back Button: "← Back"
+                val backInteraction = remember { MutableInteractionSource() }
+                val isBackFocused by backInteraction.collectIsFocusedAsState()
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isBackFocused) ColorThemeNeonGreen else ColorThemeSurface)
+                        .border(
+                            1.2.dp,
+                            if (isBackFocused) Color.White else ColorThemeBorder,
+                            RoundedCornerShape(12.dp)
+                        )
+                        .focusable(interactionSource = backInteraction)
+                        .clickable(interactionSource = backInteraction, indication = null) { onBack() }
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.CenterStart
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(TvSurfaceHighlight)
-                            .clickable { onBack() }
-                            .testTag("btn_back_from_movies"),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = TvTextPrimary,
-                            modifier = Modifier.size(20.dp)
+                            tint = if (isBackFocused) Color.Black else Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Back",
+                            color = if (isBackFocused) Color.Black else Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-
-                    Text(
-                        text = "Movies (VOD)",
-                        color = TvTextPrimary,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
 
-                Text(
-                    text = "${movies.size} Movies",
-                    color = TvTextSecondary,
-                    fontSize = 14.sp
-                )
-            }
-
-            // Layout: Category Sidebar + Movie Poster Grid
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Categories List (Left) - Fast per category, starting directly with first category
+                // Search Movie Input
                 Box(
                     modifier = Modifier
-                        .width(210.dp)
-                        .fillMaxHeight()
+                        .fillMaxWidth()
+                        .height(42.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(TvSurface)
-                        .border(1.dp, TvBorder, RoundedCornerShape(12.dp))
-                        .padding(8.dp)
+                        .background(ColorThemeSurface)
+                        .border(1.2.dp, ColorThemeBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = Color(0xFF6B7280),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = "Search films...",
+                                    color = Color(0xFF6B7280),
+                                    fontSize = 13.sp
+                                )
+                            }
+                            BasicTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                textStyle = TextStyle(
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                cursorBrush = SolidColor(ColorThemeNeonGreen),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
+                // Categories List
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
                 ) {
                     LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxSize()
                     ) {
                         items(categories, key = { it.categoryId }) { cat ->
                             val isSelected = selectedCategory?.categoryId == cat.categoryId
                             val catInteraction = remember { MutableInteractionSource() }
                             val isCatFocused by catInteraction.collectIsFocusedAsState()
-
-                            val isFavCat = cat.categoryId == IptvViewModel.ID_FAVORITES
-                            val isRecentCat = cat.categoryId == IptvViewModel.ID_RECENTS
-
-                            val bg = when {
-                                isCatFocused -> TvAccentGold
-                                isSelected -> TvSurfaceHighlight
-                                else -> Color.Transparent
-                            }
-                            val contentColor = when {
-                                isCatFocused -> TvBackground
-                                isSelected -> TvAccentGold
-                                isFavCat || isRecentCat -> TvAccentGold.copy(alpha = 0.9f)
-                                else -> TvTextSecondary
-                            }
+                            val active = isCatFocused || isSelected
 
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(bg)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (active) ColorThemeSurfaceFocused else ColorThemeSurface)
                                     .border(
-                                        width = if (isCatFocused) 2.dp else 0.dp,
-                                        color = if (isCatFocused) Color.White else Color.Transparent,
-                                        shape = RoundedCornerShape(8.dp)
+                                        width = if (isCatFocused) 1.8.dp else if (isSelected) 1.2.dp else 1.dp,
+                                        color = if (active) ColorThemeNeonGreen else ColorThemeBorder,
+                                        shape = RoundedCornerShape(12.dp)
                                     )
                                     .focusable(interactionSource = catInteraction)
-                                    .clickable(
-                                        interactionSource = catInteraction,
-                                        indication = null
-                                    ) { viewModel.selectVodCategory(cat) }
-                                    .onKeyEvent { keyEvent ->
-                                        if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                            when (keyEvent.nativeKeyEvent.keyCode) {
-                                                KeyEvent.KEYCODE_DPAD_CENTER,
-                                                KeyEvent.KEYCODE_ENTER -> {
-                                                    viewModel.selectVodCategory(cat)
-                                                    true
-                                                }
-                                                else -> false
-                                            }
-                                        } else false
+                                    .clickable(interactionSource = catInteraction, indication = null) {
+                                        viewModel.selectVodCategory(cat)
                                     }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                                    .padding(horizontal = 14.dp),
+                                contentAlignment = Alignment.CenterStart
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    if (isFavCat) {
-                                        Icon(
-                                            imageVector = Icons.Default.Favorite,
-                                            contentDescription = null,
-                                            tint = contentColor,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    } else if (isRecentCat) {
-                                        Icon(
-                                            imageVector = Icons.Default.History,
-                                            contentDescription = null,
-                                            tint = contentColor,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = cat.categoryName,
-                                        color = contentColor,
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isCatFocused || isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                                Text(
+                                    text = cat.categoryName,
+                                    color = if (active) Color.White else Color(0xFFD1D5DB),
+                                    fontSize = 13.sp,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
                 }
+            }
 
-                // Poster Grid (Right)
-                Box(
+            // RIGHT: POSTER GRID with Category Header
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Header with Green Bar
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(TvSurface)
-                        .border(1.dp, TvBorder, RoundedCornerShape(12.dp))
-                        .padding(12.dp)
+                        .fillMaxWidth()
+                        .height(38.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (isVodLoading) {
+                    Box(
+                        modifier = Modifier
+                            .width(4.dp)
+                            .height(22.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(ColorThemeNeonGreen)
+                    )
+                    Text(
+                        text = selectedCategory?.categoryName ?: "Films",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = "${displayedMovies.size} videos",
+                        color = ColorThemeNeonGreen,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                // Grid
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (isVodLoading && displayedMovies.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = TvAccentGold, modifier = Modifier.size(36.dp))
+                            CircularProgressIndicator(color = ColorThemeNeonGreen, modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
                         }
-                    } else if (movies.isEmpty()) {
+                    } else if (displayedMovies.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Movie,
-                                    contentDescription = null,
-                                    tint = TvTextMuted,
-                                    modifier = Modifier.size(40.dp)
-                                )
-                                Text(
-                                    text = "No movies available in this category",
-                                    color = TvTextMuted,
-                                    fontSize = 14.sp
-                                )
-                            }
+                            Text(text = "No movies available in this category", color = Color(0xFF6B7280), fontSize = 14.sp)
                         }
                     } else {
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(minSize = 130.dp),
-                            contentPadding = PaddingValues(4.dp),
+                            contentPadding = PaddingValues(bottom = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize()
                         ) {
-                            items(movies, key = { it.streamId }) { movie ->
-                                MoviePosterCard(
-                                    movie = movie,
-                                    onClick = {
-                                        viewModel.markMovieWatched(movie)
-                                        onSelectMovie(movie)
-                                    }
-                                )
+                            items(displayedMovies, key = { it.streamId }) { movie ->
+                                MoviePosterCard(movie = movie, onClick = { onSelectMovie(movie) })
                             }
                         }
                     }
@@ -300,33 +312,31 @@ fun MoviesScreen(
 }
 
 @Composable
-fun MoviePosterCard(
+private fun MoviePosterCard(
     movie: VodMovie,
-    onClick: () -> Unit = {}
+    onClick: () -> Unit
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
+    val interaction = remember { MutableInteractionSource() }
+    val isFocused by interaction.collectIsFocusedAsState()
 
-    Box(
+    Column(
         modifier = Modifier
-            .width(130.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isFocused) TvSurfaceHighlight else TvBackground)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isFocused) ColorThemeSurfaceFocused else ColorThemeSurface)
             .border(
                 width = if (isFocused) 2.dp else 1.dp,
-                color = if (isFocused) TvAccentGold else TvBorder,
-                shape = RoundedCornerShape(8.dp)
+                color = if (isFocused) ColorThemeNeonGreen else ColorThemeBorder,
+                shape = RoundedCornerShape(12.dp)
             )
-            .focusable(interactionSource = interactionSource)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null
-            ) { onClick() }
+            .focusable(interactionSource = interaction)
+            .clickable(interactionSource = interaction, indication = null) { onClick() }
             .onKeyEvent { keyEvent ->
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     when (keyEvent.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_DPAD_CENTER,
-                        KeyEvent.KEYCODE_ENTER -> {
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_BUTTON_A -> {
                             onClick()
                             true
                         }
@@ -334,71 +344,41 @@ fun MoviePosterCard(
                     }
                 } else false
             }
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(170.dp)
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                    .background(Color(0xFF1E2433)),
-                contentAlignment = Alignment.Center
-            ) {
-                if (!movie.streamIcon.isNullOrBlank()) {
-                    AsyncImage(
-                        model = movie.streamIcon,
-                        contentDescription = movie.name,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Movie,
-                        contentDescription = null,
-                        tint = TvTextMuted,
-                        modifier = Modifier.size(36.dp)
-                    )
-                }
-
-                if (!movie.rating.isNullOrBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(6.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color.Black.copy(alpha = 0.75f))
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = null,
-                                tint = TvAccentGold,
-                                modifier = Modifier.size(10.dp)
-                            )
-                            Text(
-                                text = movie.rating ?: "",
-                                color = Color.White,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(160.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF0F1E16)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!movie.streamIcon.isNullOrBlank()) {
+                AsyncImage(
+                    model = movie.streamIcon,
+                    contentDescription = movie.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Movie,
+                    contentDescription = null,
+                    tint = ColorThemeNeonGreen,
+                    modifier = Modifier.size(36.dp)
+                )
             }
-
-            Text(
-                text = movie.name,
-                color = if (isFocused) TvAccentGold else TvTextPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-            )
         }
+
+        Text(
+            text = movie.name,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

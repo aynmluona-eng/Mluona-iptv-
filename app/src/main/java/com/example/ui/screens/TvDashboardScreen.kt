@@ -2,11 +2,7 @@ package com.example.ui.screens
 
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,10 +26,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,11 +46,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -59,17 +59,14 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.TvAccentGold
-import com.example.ui.theme.TvBackground
-import com.example.ui.theme.TvBorder
-import com.example.ui.theme.TvSurface
-import com.example.ui.theme.TvSurfaceHighlight
+import androidx.compose.ui.window.Dialog
 import com.example.ui.theme.TvTextMuted
 import com.example.ui.theme.TvTextPrimary
 import com.example.ui.theme.TvTextSecondary
@@ -78,6 +75,16 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+// Exact color palette matching the uploaded reference image
+private val ColorGreenNeon = Color(0xFF00E676)           // Pure vibrant neon emerald green
+private val ColorGreenCardSelected = Color(0xFF00E676)   // Selected card glowing border
+private val ColorCardBgUnfocused = Color(0xFF0C1319)     // Dark charcoal glass background
+private val ColorCardBgFocused = Color(0xFF082218)       // Selected dark emerald background
+private val ColorCardBorderUnfocused = Color(0xFF162029) // Unfocused subtle border
+private val ColorCircleBadgeBg = Color(0xFF0F261C)       // Translucent dark circle badge behind icon
+private val ColorTopBtnBg = Color(0xFF0D1714)            // Top button background
+private val ColorTopBtnBorder = Color(0xFF162D22)        // Top button green border
 
 @Composable
 fun TvDashboardScreen(
@@ -101,12 +108,19 @@ fun TvDashboardScreen(
     val strings by viewModel.appText.collectAsState()
 
     var selectedIndex by remember { mutableIntStateOf(0) }
+    var showHelpDialog by remember { mutableStateOf(false) }
 
+    // Focus requesters for TV remote navigation
     val liveTvFocusRequester = remember { FocusRequester() }
-    val moviesFocusRequester = remember { FocusRequester() }
+    val filmsFocusRequester = remember { FocusRequester() }
+    val favoritesFocusRequester = remember { FocusRequester() }
     val seriesFocusRequester = remember { FocusRequester() }
-    val settingsFocusRequester = remember { FocusRequester() }
-    val profileFocusRequester = remember { FocusRequester() }
+    val addBottomFocusRequester = remember { FocusRequester() }
+
+    val topAddBtnFocusRequester = remember { FocusRequester() }
+    val topHelpBtnFocusRequester = remember { FocusRequester() }
+    val topSettingsFocusRequester = remember { FocusRequester() }
+    val topProfileFocusRequester = remember { FocusRequester() }
 
     // Ensure default focus is ON LIVE TV immediately upon entering Dashboard
     LaunchedEffect(Unit) {
@@ -117,294 +131,522 @@ fun TvDashboardScreen(
         } catch (_: Exception) {}
     }
 
-    // Live clock updater
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Live clock and date matching phone/device system settings automatically
     var currentTimeString by remember {
-        mutableStateOf(SimpleDateFormat("hh:mm a", Locale.ENGLISH).format(Date()).lowercase())
+        mutableStateOf(android.text.format.DateFormat.getTimeFormat(context).format(Date()))
     }
-    LaunchedEffect(Unit) {
+    var currentDateString by remember {
+        mutableStateOf(
+            SimpleDateFormat(
+                if (android.text.format.DateFormat.is24HourFormat(context)) "EEEE, d MMMM" else "EEEE, MMMM d",
+                Locale.getDefault()
+            ).format(Date())
+        )
+    }
+    LaunchedEffect(context) {
         while (true) {
-            currentTimeString = SimpleDateFormat("hh:mm a", Locale.ENGLISH).format(Date()).lowercase()
-            delay(30000)
+            val now = Date()
+            currentTimeString = android.text.format.DateFormat.getTimeFormat(context).format(now)
+            currentDateString = SimpleDateFormat(
+                if (android.text.format.DateFormat.is24HourFormat(context)) "EEEE, d MMMM" else "EEEE, MMMM d",
+                Locale.getDefault()
+            ).format(now)
+            delay(1000)
         }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF141C21),
-                        Color(0xFF0D1216),
-                        Color(0xFF080B0D)
-                    ),
-                    center = Offset(300f, 150f),
-                    radius = 1200f
-                )
-            )
-            .padding(horizontal = 40.dp, vertical = 20.dp)
+            .background(Color.Black)
+            .padding(horizontal = 38.dp, vertical = 20.dp)
             .testTag("tv_dashboard_screen")
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top Bar: Center Logo / Brand, Right Settings & Avatar
-            Box(
+            // ========================================================
+            // 1. TOP BAR (MLUONA IPTV | 15:32 + Date | 4 Action Buttons)
+            // ========================================================
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(58.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Centered App Name / Logo: mluona iptv
+                // Left: "MLUONA IPTV" (MLUONA in green, IPTV in white)
                 Row(
-                    modifier = Modifier.align(Alignment.Center),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "mluona",
-                        color = Color.White,
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.Bold,
+                        text = "MLUONA",
+                        color = ColorGreenNeon,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 0.5.sp
                     )
                     Text(
-                        text = " iptv",
-                        color = TvAccentGold,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.offset(y = (-2).dp)
+                        text = "IPTV",
+                        color = Color.White,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.sp
                     )
-                }
 
-                // Right action buttons
-                Row(
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
                     if (isLoading) {
+                        Spacer(modifier = Modifier.width(10.dp))
                         CircularProgressIndicator(
-                            color = TvAccentGold,
-                            modifier = Modifier.size(20.dp),
+                            color = ColorGreenNeon,
+                            modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp
                         )
                     }
+                }
 
-                    TvCircleIconButton(
+                // Center: Time "15:32" and Date "Wednesday, September 30"
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = currentTimeString,
+                        color = Color.White,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = currentDateString,
+                        color = Color(0xFFB0BEC5),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                // Right: 4 Buttons (+ Add | ? | Settings | Profile)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Button 1: "+ Add" Pill Button
+                    TopAddPillButton(
+                        focusRequester = topAddBtnFocusRequester,
+                        onDown = { liveTvFocusRequester.requestFocus() },
+                        onRight = { topHelpBtnFocusRequester.requestFocus() },
+                        onClick = onNavigateToUsers
+                    )
+
+                    // Button 2: "(?)" Help Button
+                    TopSquareIconButton(
+                        text = "?",
+                        contentDescription = "Help",
+                        testTag = "btn_help",
+                        focusRequester = topHelpBtnFocusRequester,
+                        onLeft = { topAddBtnFocusRequester.requestFocus() },
+                        onDown = { filmsFocusRequester.requestFocus() },
+                        onRight = { topSettingsFocusRequester.requestFocus() },
+                        onClick = { showHelpDialog = true }
+                    )
+
+                    // Button 3: Settings Button
+                    TopSquareIconButton(
                         icon = Icons.Default.Settings,
                         contentDescription = strings.settings,
                         testTag = "btn_settings",
-                        focusRequester = settingsFocusRequester,
-                        onDown = {
-                            when (selectedIndex) {
-                                1 -> moviesFocusRequester.requestFocus()
-                                2 -> seriesFocusRequester.requestFocus()
-                                else -> liveTvFocusRequester.requestFocus()
-                            }
-                        },
-                        onRight = { profileFocusRequester.requestFocus() },
+                        focusRequester = topSettingsFocusRequester,
+                        onLeft = { topHelpBtnFocusRequester.requestFocus() },
+                        onDown = { seriesFocusRequester.requestFocus() },
+                        onRight = { topProfileFocusRequester.requestFocus() },
                         onClick = onNavigateToSettings
                     )
 
-                    TvProfileIconButton(
-                        onClick = onNavigateToUsers,
-                        hasAccount = activeAccount != null,
+                    // Button 4: Solid Green Profile Button (as in uploaded screenshot)
+                    TopSolidProfileButton(
+                        focusRequester = topProfileFocusRequester,
                         testTag = "btn_profile",
-                        focusRequester = profileFocusRequester,
-                        onDown = {
-                            when (selectedIndex) {
-                                1 -> moviesFocusRequester.requestFocus()
-                                2 -> seriesFocusRequester.requestFocus()
-                                else -> liveTvFocusRequester.requestFocus()
-                            }
-                        },
-                        onLeft = { settingsFocusRequester.requestFocus() }
+                        onLeft = { topSettingsFocusRequester.requestFocus() },
+                        onDown = { seriesFocusRequester.requestFocus() },
+                        onClick = onNavigateToUsers
                     )
                 }
             }
 
-            // Main 3 Hero TV Cards (Live TV, Movies, Series)
+            // ========================================================
+            // 2. CENTER SECTION: 3 Columns Grid
+            //    Column 1: Tall "Live TV" Card
+            //    Column 2: Top "Films" + Bottom "Favorites"
+            //    Column 3: Top "Series" + Bottom "+ Add"
+            // ========================================================
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .weight(1f)
                     .padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 1. Live TV Card (Default Focused)
-                HeroTvCard(
-                    title = strings.liveTv,
-                    countLabel = if (liveCount > 0) "+$liveCount ${strings.channels}" else "+5000 ${strings.channels}",
-                    updateTimeLabel = "Last Update: Today",
-                    iconType = CardIconType.LIVE_TV,
+                // COLUMN 1: TALL "LIVE TV" CARD (Full Height)
+                LiveTvTallCard(
+                    title = "Live TV",
+                    subtitle = if (liveCount > 0) "$liveCount channels" else "120 channels",
                     isSelected = selectedIndex == 0,
                     focusRequester = liveTvFocusRequester,
                     onFocus = { selectedIndex = 0 },
                     onNavigateRight = {
                         selectedIndex = 1
-                        moviesFocusRequester.requestFocus()
+                        filmsFocusRequester.requestFocus()
                     },
-                    onNavigateLeft = null,
-                    onNavigateUp = {
-                        settingsFocusRequester.requestFocus()
-                    },
+                    onNavigateUp = { topAddBtnFocusRequester.requestFocus() },
                     onClick = {
                         selectedIndex = 0
                         onNavigateToLiveTv()
                     },
                     modifier = Modifier
                         .weight(1f)
+                        .fillMaxHeight()
                         .testTag("card_live_tv")
                 )
 
-                // 2. Movies Card
-                HeroTvCard(
-                    title = strings.movies,
-                    countLabel = if (vodCount > 0) "+$vodCount ${strings.movies}" else "+1200 ${strings.movies}",
-                    updateTimeLabel = "Last Update: 2 hrs ago",
-                    iconType = CardIconType.MOVIES,
-                    isSelected = selectedIndex == 1,
-                    focusRequester = moviesFocusRequester,
-                    onFocus = { selectedIndex = 1 },
-                    onNavigateRight = {
-                        selectedIndex = 2
-                        seriesFocusRequester.requestFocus()
-                    },
-                    onNavigateLeft = {
-                        selectedIndex = 0
-                        liveTvFocusRequester.requestFocus()
-                    },
-                    onNavigateUp = {
-                        settingsFocusRequester.requestFocus()
-                    },
-                    onClick = {
-                        selectedIndex = 1
-                        onNavigateToMovies()
-                    },
+                // COLUMN 2: Stack of "Films" (Top) + "Favorites" (Bottom)
+                Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .testTag("card_movies")
-                )
-
-                // 3. Series Card
-                HeroTvCard(
-                    title = strings.series,
-                    countLabel = if (seriesCount > 0) "+$seriesCount ${strings.series}" else "+500 ${strings.series}",
-                    updateTimeLabel = "Last Update: 2 hrs ago",
-                    iconType = CardIconType.SERIES,
-                    isSelected = selectedIndex == 2,
-                    focusRequester = seriesFocusRequester,
-                    onFocus = { selectedIndex = 2 },
-                    onNavigateRight = null,
-                    onNavigateLeft = {
-                        selectedIndex = 1
-                        moviesFocusRequester.requestFocus()
-                    },
-                    onNavigateUp = {
-                        profileFocusRequester.requestFocus()
-                    },
-                    onClick = {
-                        selectedIndex = 2
-                        onNavigateToSeries()
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("card_series")
-                )
-            }
-
-            // Bottom Bar: Timeshift pill (left) and Clock / Weather / Server status (right)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Bottom-left Timeshift pill
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xFF13191E))
-                        .border(1.dp, Color(0xFF222B32), RoundedCornerShape(20.dp))
-                        .clickable { onNavigateToLiveTv() }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        .weight(1.05f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    HandDrawnClockIcon(modifier = Modifier.size(16.dp))
-                    Text(
-                        text = strings.timeshift,
-                        color = TvTextSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                    // Films Card
+                    CategoryMediumCard(
+                        title = "Films",
+                        subtitle = if (vodCount > 0) "$vodCount videos" else "12 videos",
+                        iconType = MediumCardIcon.FILMS,
+                        isSelected = selectedIndex == 1,
+                        focusRequester = filmsFocusRequester,
+                        onFocus = { selectedIndex = 1 },
+                        onNavigateLeft = {
+                            selectedIndex = 0
+                            liveTvFocusRequester.requestFocus()
+                        },
+                        onNavigateRight = {
+                            selectedIndex = 3
+                            seriesFocusRequester.requestFocus()
+                        },
+                        onNavigateDown = {
+                            selectedIndex = 2
+                            favoritesFocusRequester.requestFocus()
+                        },
+                        onNavigateUp = { topHelpBtnFocusRequester.requestFocus() },
+                        onClick = {
+                            selectedIndex = 1
+                            onNavigateToMovies()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .testTag("card_movies")
+                    )
+
+                    // Favorites Pill Card
+                    BottomActionPillCard(
+                        title = "Favorites",
+                        subtitle = "0 items",
+                        icon = Icons.Default.Favorite,
+                        isSelected = selectedIndex == 2,
+                        focusRequester = favoritesFocusRequester,
+                        onFocus = { selectedIndex = 2 },
+                        onNavigateLeft = {
+                            selectedIndex = 0
+                            liveTvFocusRequester.requestFocus()
+                        },
+                        onNavigateRight = {
+                            selectedIndex = 4
+                            addBottomFocusRequester.requestFocus()
+                        },
+                        onNavigateUp = {
+                            selectedIndex = 1
+                            filmsFocusRequester.requestFocus()
+                        },
+                        onClick = {
+                            selectedIndex = 2
+                            onNavigateToLiveTv()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(72.dp)
+                            .testTag("card_favorites")
                     )
                 }
 
-                // Bottom-right Live Clock & Server/Location status
+                // COLUMN 3: Stack of "Series" (Top) + "+ Add" (Bottom)
+                Column(
+                    modifier = Modifier
+                        .weight(1.05f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Series Card
+                    CategoryMediumCard(
+                        title = "Series",
+                        subtitle = if (seriesCount > 0) "$seriesCount seasons" else "3 seasons",
+                        iconType = MediumCardIcon.SERIES,
+                        isSelected = selectedIndex == 3,
+                        focusRequester = seriesFocusRequester,
+                        onFocus = { selectedIndex = 3 },
+                        onNavigateLeft = {
+                            selectedIndex = 1
+                            filmsFocusRequester.requestFocus()
+                        },
+                        onNavigateDown = {
+                            selectedIndex = 4
+                            addBottomFocusRequester.requestFocus()
+                        },
+                        onNavigateUp = { topSettingsFocusRequester.requestFocus() },
+                        onClick = {
+                            selectedIndex = 3
+                            onNavigateToSeries()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .testTag("card_series")
+                    )
+
+                    // "+ Add" Pill Card
+                    BottomActionPillCard(
+                        title = "Add",
+                        subtitle = null,
+                        icon = Icons.Default.Add,
+                        isSelected = selectedIndex == 4,
+                        focusRequester = addBottomFocusRequester,
+                        onFocus = { selectedIndex = 4 },
+                        onNavigateLeft = {
+                            selectedIndex = 2
+                            favoritesFocusRequester.requestFocus()
+                        },
+                        onNavigateUp = {
+                            selectedIndex = 3
+                            seriesFocusRequester.requestFocus()
+                        },
+                        onClick = {
+                            selectedIndex = 4
+                            onNavigateToUsers()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(72.dp)
+                            .testTag("card_bottom_add")
+                    )
+                }
+            }
+
+            // ========================================================
+            // 3. BOTTOM BAR (Profile 1 | Stats | Device ID | MLUONA PLAYER)
+            // ========================================================
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Left Meta row
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = currentTimeString,
-                        color = Color.White,
-                        fontSize = 16.sp,
+                        text = "Profile:",
+                        color = Color(0xFF90A4AE),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                    Text(
+                        text = activeAccount?.name ?: "Profile 1",
+                        color = ColorGreenNeon,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Text(
+                        text = "|",
+                        color = Color(0xFF37474F),
+                        fontSize = 14.sp
+                    )
+
+                    Text(
+                        text = if (vodCount > 0) "$vodCount videos in ${activeAccount?.name ?: "4 lists"}" else "12 videos in 4 lists",
+                        color = Color(0xFFB0BEC5),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+
+                    Text(
+                        text = "|",
+                        color = Color(0xFF37474F),
+                        fontSize = 14.sp
+                    )
+
+                    Text(
+                        text = "Device ID:",
+                        color = Color(0xFF90A4AE),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                    Text(
+                        text = "bd:71:0e:43:b2:2e",
+                        color = ColorGreenNeon,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                // Right Badge: "MLUONA PLAYER" with green border
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .border(1.2.dp, ColorGreenNeon, RoundedCornerShape(50))
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "MLUONA PLAYER",
+                        color = ColorGreenNeon,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+            }
+        }
+    }
+
+    // Help Dialog
+    if (showHelpDialog) {
+        Dialog(onDismissRequest = { showHelpDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xFF0F1813),
+                border = androidx.compose.foundation.BorderStroke(1.5.dp, ColorGreenNeon),
+                modifier = Modifier
+                    .width(420.dp)
+                    .padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "MLUONA",
+                            color = ColorGreenNeon,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "IPTV",
+                            color = Color.White,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    Text(
+                        text = "Version 1.0",
+                        color = TvTextSecondary,
+                        fontSize = 13.sp
                     )
 
                     Box(
                         modifier = Modifier
-                            .width(1.dp)
-                            .height(18.dp)
-                            .background(Color(0xFF28343D))
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color(0xFF1B2F24))
                     )
 
                     Column(
-                        horizontalAlignment = Alignment.Start
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = activeAccount?.name ?: "Mluona Server",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = if (activeAccount != null) "${strings.connected} 1080p" else strings.ready,
-                            color = TvTextMuted,
-                            fontSize = 10.sp
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(text = "Status", color = TvTextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = if (activeAccount != null) "Connected" else "Active",
+                                color = ColorGreenNeon,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(text = "Playlist", color = TvTextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = activeAccount?.name ?: "Profile 1",
+                                color = Color.White,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(text = "Channels", color = TvTextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = if (liveCount > 0) "$liveCount" else "120",
+                                color = ColorGreenNeon,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
 
-                    HandDrawnWeatherIcon(modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    Text(
-                        text = "24°",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Button(
+                        onClick = { showHelpDialog = false },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ColorGreenNeon,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "OK",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-enum class CardIconType {
-    LIVE_TV,
-    MOVIES,
-    SERIES
-}
-
+/**
+ * Tall Card for "Live TV" spanning full height with retro TV icon and wave background
+ */
 @Composable
-fun HeroTvCard(
+fun LiveTvTallCard(
     title: String,
-    countLabel: String,
-    updateTimeLabel: String,
-    iconType: CardIconType,
+    subtitle: String,
     isSelected: Boolean,
     focusRequester: FocusRequester? = null,
     onFocus: () -> Unit,
     onNavigateRight: (() -> Unit)? = null,
-    onNavigateLeft: (() -> Unit)? = null,
     onNavigateUp: (() -> Unit)? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -412,26 +654,38 @@ fun HeroTvCard(
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
-    val active = isFocused
-
-    val borderColor = if (active) Color(0xFF2DD4BF) else Color(0xFF212930)
+    val active = isFocused || isSelected
 
     Box(
         modifier = modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .graphicsLayer {
-                translationY = if (active) -12f else 0f
-                scaleX = if (active) 1.04f else 1.0f
-                scaleY = if (active) 1.04f else 1.0f
-            }
-            .height(205.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(
+                if (active) {
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF0F3223),
+                            Color(0xFF0B241A),
+                            Color(0xFF071711)
+                        )
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            ColorCardBgUnfocused,
+                            Color(0xFF0A1015),
+                            Color(0xFF070B0E)
+                        )
+                    )
+                }
+            )
+            .border(
+                width = if (active) 2.dp else 1.dp,
+                color = if (active) ColorGreenCardSelected else ColorCardBorderUnfocused,
+                shape = RoundedCornerShape(22.dp)
+            )
             .focusable(interactionSource = interactionSource)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null
-            ) {
-                onClick()
-            }
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
             .onKeyEvent { keyEvent ->
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     when (keyEvent.nativeKeyEvent.keyCode) {
@@ -448,9 +702,148 @@ fun HeroTvCard(
                                 true
                             } else false
                         }
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (onNavigateUp != null) {
+                                onNavigateUp()
+                                true
+                            } else false
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+    ) {
+        // Wave Curves Background
+        WaveGraphicOverlay(isActive = active)
+
+        // Content: Centered circle badge with Retro TV icon, title & subtitle
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Circular Icon Badge
+            Box(
+                modifier = Modifier
+                    .size(96.dp)
+                    .clip(CircleShape)
+                    .background(ColorCircleBadgeBg)
+                    .border(1.2.dp, if (active) ColorGreenNeon.copy(alpha = 0.5f) else Color(0xFF143024), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                RetroTvEmblemIcon(
+                    modifier = Modifier.size(54.dp),
+                    isGreen = true
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.3.sp
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = subtitle,
+                color = if (active) Color(0xFF81C784) else Color(0xFF90A4AE),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+enum class MediumCardIcon {
+    FILMS,
+    SERIES
+}
+
+/**
+ * Medium Card for "Films" and "Series"
+ */
+@Composable
+fun CategoryMediumCard(
+    title: String,
+    subtitle: String,
+    iconType: MediumCardIcon,
+    isSelected: Boolean,
+    focusRequester: FocusRequester? = null,
+    onFocus: () -> Unit,
+    onNavigateLeft: (() -> Unit)? = null,
+    onNavigateRight: (() -> Unit)? = null,
+    onNavigateDown: (() -> Unit)? = null,
+    onNavigateUp: (() -> Unit)? = null,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    val active = isFocused || isSelected
+
+    Box(
+        modifier = modifier
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                if (active) {
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF0F3223),
+                            Color(0xFF0B241A),
+                            Color(0xFF071711)
+                        )
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            ColorCardBgUnfocused,
+                            Color(0xFF0A1015),
+                            Color(0xFF070B0E)
+                        )
+                    )
+                }
+            )
+            .border(
+                width = if (active) 2.dp else 1.dp,
+                color = if (active) ColorGreenCardSelected else ColorCardBorderUnfocused,
+                shape = RoundedCornerShape(20.dp)
+            )
+            .focusable(interactionSource = interactionSource)
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
+            .onKeyEvent { keyEvent ->
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER,
+                        KeyEvent.KEYCODE_BUTTON_A -> {
+                            onClick()
+                            true
+                        }
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
                             if (onNavigateLeft != null) {
                                 onNavigateLeft()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (onNavigateRight != null) {
+                                onNavigateRight()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (onNavigateDown != null) {
+                                onNavigateDown()
                                 true
                             } else false
                         }
@@ -462,114 +855,163 @@ fun HeroTvCard(
                         }
                         else -> false
                     }
-                } else {
-                    false
-                }
+                } else false
             }
     ) {
+        // Wave Curves Background
+        WaveGraphicOverlay(isActive = active)
 
-        // Card Main Body
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .clip(RoundedCornerShape(22.dp))
-                .background(
-                    if (active) {
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFF193B41), // Luminous teal-cyan glass
-                                Color(0xFF132F34),
-                                Color(0xFF0D2024)
-                            )
-                        )
-                    } else {
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFF151B20), // Charcoal slate glass
-                                Color(0xFF101519),
-                                Color(0xFF0C1013)
-                            )
-                        )
-                    }
-                )
-                .border(
-                    width = if (active) 1.8.dp else 1.dp,
-                    color = borderColor,
-                    shape = RoundedCornerShape(22.dp)
-                )
-                .padding(horizontal = 22.dp, vertical = 20.dp)
+                .padding(vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            // Diffuse warm ambient light ray bleeding down from the top tab when active
-            if (active) {
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                        .align(Alignment.TopCenter)
-                ) {
-                    drawRect(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                Color(0x55FFC107),
-                                Color(0x15FFC107),
-                                Color.Transparent
-                            ),
-                            center = Offset(size.width / 2f, 0f),
-                            radius = size.width * 0.45f
-                        )
+            // Circular Icon Badge
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(ColorCircleBadgeBg)
+                    .border(1.2.dp, if (active) ColorGreenNeon.copy(alpha = 0.5f) else Color(0xFF143024), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                when (iconType) {
+                    MediumCardIcon.FILMS -> ClapperboardEmblemIcon(
+                        modifier = Modifier.size(46.dp)
+                    )
+                    MediumCardIcon.SERIES -> SeriesTvPlayEmblemIcon(
+                        modifier = Modifier.size(46.dp)
                     )
                 }
             }
 
-            // Card Inner Layout
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.SpaceBetween
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = subtitle,
+                color = if (active) Color(0xFF81C784) else Color(0xFF90A4AE),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+/**
+ * Bottom Action Pill Card ("Favorites" and "+ Add")
+ */
+@Composable
+fun BottomActionPillCard(
+    title: String,
+    subtitle: String?,
+    icon: ImageVector,
+    isSelected: Boolean,
+    focusRequester: FocusRequester? = null,
+    onFocus: () -> Unit,
+    onNavigateLeft: (() -> Unit)? = null,
+    onNavigateRight: (() -> Unit)? = null,
+    onNavigateUp: (() -> Unit)? = null,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    val active = isFocused || isSelected
+
+    Box(
+        modifier = modifier
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (active) ColorCardBgFocused else ColorCardBgUnfocused)
+            .border(
+                width = if (active) 2.dp else 1.dp,
+                color = if (active) ColorGreenCardSelected else ColorCardBorderUnfocused,
+                shape = RoundedCornerShape(18.dp)
+            )
+            .focusable(interactionSource = interactionSource)
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
+            .onKeyEvent { keyEvent ->
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER,
+                        KeyEvent.KEYCODE_BUTTON_A -> {
+                            onClick()
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            if (onNavigateLeft != null) {
+                                onNavigateLeft()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (onNavigateRight != null) {
+                                onNavigateRight()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (onNavigateUp != null) {
+                                onNavigateUp()
+                                true
+                            } else false
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Green Circle Badge with Icon
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(ColorCircleBadgeBg)
+                    .border(1.dp, ColorGreenNeon.copy(alpha = 0.4f), CircleShape),
+                contentAlignment = Alignment.Center
             ) {
-                // Card Title
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = ColorGreenNeon,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Column {
                 Text(
                     text = title,
                     color = Color.White,
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.3.sp
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
                 )
-
-                // Bottom row: count & update on left, custom hand-drawn icon on right
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = countLabel,
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            HandDrawnRefreshIcon(modifier = Modifier.size(11.dp))
-                            Text(
-                                text = updateTimeLabel,
-                                color = TvTextMuted,
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
-
-                    // Hand-crafted line icon with golden accent inside
-                    when (iconType) {
-                        CardIconType.LIVE_TV -> HandDrawnTvIcon(modifier = Modifier.size(54.dp))
-                        CardIconType.MOVIES -> HandDrawnMovieCameraIcon(modifier = Modifier.size(54.dp))
-                        CardIconType.SERIES -> HandDrawnSeriesIcon(modifier = Modifier.size(54.dp))
-                    }
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        color = Color(0xFF90A4AE),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
@@ -577,305 +1019,10 @@ fun HeroTvCard(
 }
 
 /**
- * Hand-drawn TV Icon with golden lightning mark inside
+ * Top "+ Add" Pill Button
  */
 @Composable
-fun HandDrawnTvIcon(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-
-        val strokeColor = Color.White
-        val accentColor = Color(0xFFFFBF00)
-        val strokeW = 2.4.dp.toPx()
-
-        // 1. Two antenna ears angled from top
-        val topCenter = Offset(w * 0.5f, h * 0.28f)
-        val leftEar = Offset(w * 0.32f, h * 0.12f)
-        val rightEar = Offset(w * 0.68f, h * 0.12f)
-
-        drawLine(
-            color = strokeColor,
-            start = topCenter,
-            end = leftEar,
-            strokeWidth = strokeW,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = strokeColor,
-            start = topCenter,
-            end = rightEar,
-            strokeWidth = strokeW,
-            cap = StrokeCap.Round
-        )
-
-        // 2. Rounded TV Screen Frame
-        val screenLeft = w * 0.12f
-        val screenTop = h * 0.28f
-        val screenWidth = w * 0.76f
-        val screenHeight = h * 0.62f
-        val cornerRad = CornerRadius(14.dp.toPx(), 14.dp.toPx())
-
-        drawRoundRect(
-            color = strokeColor,
-            topLeft = Offset(screenLeft, screenTop),
-            size = Size(screenWidth, screenHeight),
-            cornerRadius = cornerRad,
-            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-
-        // 3. Golden lightning bolt in center
-        val boltPath = Path().apply {
-            moveTo(w * 0.53f, h * 0.44f)
-            lineTo(w * 0.43f, h * 0.60f)
-            lineTo(w * 0.49f, h * 0.60f)
-            lineTo(w * 0.46f, h * 0.74f)
-            lineTo(w * 0.57f, h * 0.56f)
-            lineTo(w * 0.50f, h * 0.56f)
-            close()
-        }
-        drawPath(path = boltPath, color = accentColor, style = Fill)
-    }
-}
-
-/**
- * Hand-drawn Movie Camera Icon with golden viewfinder window inside
- */
-@Composable
-fun HandDrawnMovieCameraIcon(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-
-        val strokeColor = Color.White
-        val accentColor = Color(0xFFFFBF00)
-        val strokeW = 2.4.dp.toPx()
-
-        // 1. Two top film reels (circular rings)
-        val reelRadius = w * 0.13f
-        val leftReelCenter = Offset(w * 0.32f, h * 0.28f)
-        val rightReelCenter = Offset(w * 0.56f, h * 0.28f)
-
-        drawCircle(
-            color = strokeColor,
-            radius = reelRadius,
-            center = leftReelCenter,
-            style = Stroke(width = strokeW)
-        )
-        drawCircle(
-            color = strokeColor,
-            radius = reelRadius,
-            center = rightReelCenter,
-            style = Stroke(width = strokeW)
-        )
-
-        // 2. Camera rectangular body
-        val bodyLeft = w * 0.16f
-        val bodyTop = h * 0.42f
-        val bodyWidth = w * 0.50f
-        val bodyHeight = h * 0.46f
-        val bodyCorner = CornerRadius(10.dp.toPx(), 10.dp.toPx())
-
-        drawRoundRect(
-            color = strokeColor,
-            topLeft = Offset(bodyLeft, bodyTop),
-            size = Size(bodyWidth, bodyHeight),
-            cornerRadius = bodyCorner,
-            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-
-        // 3. Right lens cone/funnel
-        val lensPath = Path().apply {
-            moveTo(bodyLeft + bodyWidth, h * 0.52f)
-            lineTo(w * 0.84f, h * 0.42f)
-            lineTo(w * 0.84f, h * 0.78f)
-            lineTo(bodyLeft + bodyWidth, h * 0.68f)
-            close()
-        }
-        drawPath(
-            path = lensPath,
-            color = strokeColor,
-            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-
-        // 4. Golden window / lens inside body
-        val innerBoxLeft = bodyLeft + bodyWidth * 0.25f
-        val innerBoxTop = bodyTop + bodyHeight * 0.26f
-        val innerBoxWidth = bodyWidth * 0.48f
-        val innerBoxHeight = bodyHeight * 0.48f
-        val innerCorner = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-
-        drawRoundRect(
-            color = accentColor,
-            topLeft = Offset(innerBoxLeft, innerBoxTop),
-            size = Size(innerBoxWidth, innerBoxHeight),
-            cornerRadius = innerCorner,
-            style = Stroke(width = 2.2.dp.toPx())
-        )
-    }
-}
-
-/**
- * Hand-drawn Series Display Icon with golden play button inside
- */
-@Composable
-fun HandDrawnSeriesIcon(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-
-        val strokeColor = Color.White
-        val accentColor = Color(0xFFFFBF00)
-        val strokeW = 2.4.dp.toPx()
-
-        // 1. Clapper / Screen Rounded Outer Frame
-        val frameLeft = w * 0.16f
-        val frameTop = h * 0.24f
-        val frameWidth = w * 0.68f
-        val frameHeight = h * 0.64f
-        val corner = CornerRadius(14.dp.toPx(), 14.dp.toPx())
-
-        drawRoundRect(
-            color = strokeColor,
-            topLeft = Offset(frameLeft, frameTop),
-            size = Size(frameWidth, frameHeight),
-            cornerRadius = corner,
-            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-
-        // 2. Clapper divider line near the top
-        drawLine(
-            color = strokeColor,
-            start = Offset(frameLeft, h * 0.40f),
-            end = Offset(frameLeft + frameWidth, h * 0.40f),
-            strokeWidth = strokeW
-        )
-
-        // Vertical tick marks on the clapper head
-        drawLine(
-            color = strokeColor,
-            start = Offset(w * 0.38f, frameTop),
-            end = Offset(w * 0.38f, h * 0.40f),
-            strokeWidth = 1.8.dp.toPx()
-        )
-        drawLine(
-            color = strokeColor,
-            start = Offset(w * 0.62f, frameTop),
-            end = Offset(w * 0.62f, h * 0.40f),
-            strokeWidth = 1.8.dp.toPx()
-        )
-
-        // 3. Golden Play triangle in the center
-        val playPath = Path().apply {
-            moveTo(w * 0.44f, h * 0.52f)
-            lineTo(w * 0.62f, h * 0.64f)
-            lineTo(w * 0.44f, h * 0.76f)
-            close()
-        }
-        drawPath(path = playPath, color = accentColor, style = Fill)
-    }
-}
-
-/**
- * Hand-drawn Clock icon for Timeshift
- */
-@Composable
-fun HandDrawnClockIcon(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val strokeColor = Color(0xFFA0AEC0)
-        val strokeW = 1.6.dp.toPx()
-        val r = size.width * 0.42f
-        val c = Offset(size.width / 2f, size.height / 2f)
-
-        drawCircle(
-            color = strokeColor,
-            radius = r,
-            center = c,
-            style = Stroke(width = strokeW)
-        )
-
-        // Clock hands
-        drawLine(
-            color = strokeColor,
-            start = c,
-            end = Offset(c.x, c.y - r * 0.55f),
-            strokeWidth = strokeW,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = strokeColor,
-            start = c,
-            end = Offset(c.x + r * 0.45f, c.y),
-            strokeWidth = strokeW,
-            cap = StrokeCap.Round
-        )
-    }
-}
-
-/**
- * Hand-drawn Weather / Status Icon
- */
-@Composable
-fun HandDrawnWeatherIcon(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val goldColor = Color(0xFFFFBF00)
-        val cloudColor = Color.White
-
-        // Sun behind cloud
-        drawCircle(
-            color = goldColor,
-            radius = w * 0.22f,
-            center = Offset(w * 0.65f, h * 0.35f),
-            style = Fill
-        )
-
-        // Cloud outline
-        val cloudPath = Path().apply {
-            moveTo(w * 0.22f, h * 0.68f)
-            lineTo(w * 0.70f, h * 0.68f)
-            cubicTo(w * 0.85f, h * 0.68f, w * 0.85f, h * 0.48f, w * 0.70f, h * 0.48f)
-            cubicTo(w * 0.68f, h * 0.30f, w * 0.42f, h * 0.30f, w * 0.38f, h * 0.46f)
-            cubicTo(w * 0.18f, h * 0.46f, w * 0.16f, h * 0.68f, w * 0.22f, h * 0.68f)
-            close()
-        }
-        drawPath(
-            path = cloudPath,
-            color = cloudColor,
-            style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-    }
-}
-
-/**
- * Hand-drawn Refresh Icon
- */
-@Composable
-fun HandDrawnRefreshIcon(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val strokeColor = Color(0xFF8B98A5)
-        val strokeW = 1.4.dp.toPx()
-        val r = size.width * 0.4f
-        val c = Offset(size.width / 2f, size.height / 2f)
-
-        drawArc(
-            color = strokeColor,
-            startAngle = 45f,
-            sweepAngle = 270f,
-            useCenter = false,
-            topLeft = Offset(c.x - r, c.y - r),
-            size = Size(r * 2, r * 2),
-            style = Stroke(width = strokeW, cap = StrokeCap.Round)
-        )
-    }
-}
-
-@Composable
-fun TvCircleIconButton(
-    icon: ImageVector,
-    contentDescription: String,
-    testTag: String,
+fun TopAddPillButton(
     focusRequester: FocusRequester? = null,
     onDown: (() -> Unit)? = null,
     onRight: (() -> Unit)? = null,
@@ -884,22 +1031,19 @@ fun TvCircleIconButton(
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
-    Box(
+    Row(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .size(38.dp)
-            .clip(CircleShape)
-            .background(if (isFocused) TvAccentGold else Color(0xFF161E24))
+            .height(38.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (isFocused) ColorGreenNeon else ColorTopBtnBg)
             .border(
-                width = 1.dp,
-                color = if (isFocused) Color.White else Color(0xFF26323B),
-                shape = CircleShape
+                width = 1.4.dp,
+                color = if (isFocused) Color.White else ColorGreenNeon,
+                shape = RoundedCornerShape(50)
             )
             .focusable(interactionSource = interactionSource)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null
-            ) { onClick() }
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
             .onKeyEvent { keyEvent ->
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     when (keyEvent.nativeKeyEvent.keyCode) {
@@ -926,26 +1070,39 @@ fun TvCircleIconButton(
                     }
                 } else false
             }
-            .testTag(testTag),
-        contentAlignment = Alignment.Center
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = if (isFocused) TvBackground else TvTextPrimary,
-            modifier = Modifier.size(18.dp)
+            imageVector = Icons.Default.Add,
+            contentDescription = "Add",
+            tint = if (isFocused) Color.Black else ColorGreenNeon,
+            modifier = Modifier.size(17.dp)
+        )
+        Text(
+            text = "Add",
+            color = if (isFocused) Color.Black else Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }
 
+/**
+ * Top Square Icon Button for Help and Settings
+ */
 @Composable
-fun TvProfileIconButton(
-    onClick: () -> Unit,
-    hasAccount: Boolean,
+fun TopSquareIconButton(
+    icon: ImageVector? = null,
+    text: String? = null,
+    contentDescription: String,
     testTag: String,
     focusRequester: FocusRequester? = null,
+    onLeft: (() -> Unit)? = null,
     onDown: (() -> Unit)? = null,
-    onLeft: (() -> Unit)? = null
+    onRight: (() -> Unit)? = null,
+    onClick: () -> Unit = {}
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -954,18 +1111,95 @@ fun TvProfileIconButton(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .size(38.dp)
-            .clip(CircleShape)
-            .background(Color(0xFF161E24))
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isFocused) ColorGreenNeon else ColorTopBtnBg)
             .border(
-                width = if (isFocused) 1.8.dp else 1.dp,
-                color = if (isFocused) TvAccentGold else Color(0xFF26323B),
-                shape = CircleShape
+                width = 1.2.dp,
+                color = if (isFocused) Color.White else ColorTopBtnBorder,
+                shape = RoundedCornerShape(10.dp)
             )
             .focusable(interactionSource = interactionSource)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null
-            ) { onClick() }
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
+            .onKeyEvent { keyEvent ->
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER,
+                        KeyEvent.KEYCODE_BUTTON_A -> {
+                            onClick()
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (onDown != null) {
+                                onDown()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            if (onLeft != null) {
+                                onLeft()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (onRight != null) {
+                                onRight()
+                                true
+                            } else false
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = if (isFocused) Color.Black else ColorGreenNeon,
+                modifier = Modifier.size(19.dp)
+            )
+        } else if (text != null) {
+            Text(
+                text = text,
+                color = if (isFocused) Color.Black else ColorGreenNeon,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+/**
+ * Top Solid Green Profile Button (as in uploaded screenshot)
+ */
+@Composable
+fun TopSolidProfileButton(
+    focusRequester: FocusRequester? = null,
+    testTag: String,
+    onLeft: (() -> Unit)? = null,
+    onDown: (() -> Unit)? = null,
+    onClick: () -> Unit = {}
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Box(
+        modifier = Modifier
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .size(38.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(ColorGreenNeon)
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = if (isFocused) Color.White else Color.Transparent,
+                shape = RoundedCornerShape(10.dp)
+            )
+            .focusable(interactionSource = interactionSource)
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
             .onKeyEvent { keyEvent ->
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     when (keyEvent.nativeKeyEvent.keyCode) {
@@ -998,20 +1232,237 @@ fun TvProfileIconButton(
         Icon(
             imageVector = Icons.Default.Person,
             contentDescription = "Profile",
-            tint = TvTextPrimary,
-            modifier = Modifier.size(20.dp)
-        )
-
-        // Status indicator dot (red/amber badge as in reference image)
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 1.dp, y = (-1).dp)
-                .size(9.dp)
-                .clip(CircleShape)
-                .background(if (hasAccount) Color(0xFF22C55E) else Color(0xFFEF4444))
-                .border(1.dp, Color(0xFF161E24), CircleShape)
+            tint = Color.White,
+            modifier = Modifier.size(22.dp)
         )
     }
 }
 
+/**
+ * Flowing Wave Graphics Overlay at the bottom of cards
+ */
+@Composable
+fun WaveGraphicOverlay(isActive: Boolean) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+
+        // Bottom wave gradient fill
+        val waveFill = Path().apply {
+            moveTo(0f, h * 0.74f)
+            cubicTo(w * 0.30f, h * 0.64f, w * 0.70f, h * 0.88f, w, h * 0.68f)
+            lineTo(w, h)
+            lineTo(0f, h)
+            close()
+        }
+        drawPath(
+            path = waveFill,
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    if (isActive) Color(0x3500E676) else Color(0x1500E676),
+                    Color.Transparent
+                )
+            )
+        )
+
+        // Wave line 1
+        val waveLine = Path().apply {
+            moveTo(0f, h * 0.74f)
+            cubicTo(w * 0.30f, h * 0.64f, w * 0.70f, h * 0.88f, w, h * 0.68f)
+        }
+        drawPath(
+            path = waveLine,
+            color = if (isActive) Color(0x8000E676) else Color(0x2400E676),
+            style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
+        )
+
+        // Wave line 2
+        val waveLine2 = Path().apply {
+            moveTo(0f, h * 0.84f)
+            cubicTo(w * 0.35f, h * 0.78f, w * 0.72f, h * 0.94f, w, h * 0.82f)
+        }
+        drawPath(
+            path = waveLine2,
+            color = if (isActive) Color(0x4000E676) else Color(0x1400E676),
+            style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round)
+        )
+    }
+}
+
+/**
+ * Retro TV Emblem Icon for "Live TV" (Antennas, CRT monitor, rounded body)
+ */
+@Composable
+fun RetroTvEmblemIcon(
+    isGreen: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val strokeColor = ColorGreenNeon
+        val strokeW = 2.4.dp.toPx()
+
+        // 1. Antennas
+        val topCenter = Offset(w * 0.50f, h * 0.28f)
+        val leftEar = Offset(w * 0.28f, h * 0.08f)
+        val rightEar = Offset(w * 0.72f, h * 0.08f)
+
+        drawLine(
+            color = strokeColor,
+            start = topCenter,
+            end = leftEar,
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = strokeColor,
+            start = topCenter,
+            end = rightEar,
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+
+        // 2. TV Cabinet Frame
+        val bodyLeft = w * 0.12f
+        val bodyTop = h * 0.28f
+        val bodyWidth = w * 0.76f
+        val bodyHeight = h * 0.58f
+        val cornerRad = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+
+        drawRoundRect(
+            color = strokeColor,
+            topLeft = Offset(bodyLeft, bodyTop),
+            size = Size(bodyWidth, bodyHeight),
+            cornerRadius = cornerRad,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // 3. TV Screen inside
+        val screenLeft = bodyLeft + bodyWidth * 0.12f
+        val screenTop = bodyTop + bodyHeight * 0.14f
+        val screenWidth = bodyWidth * 0.76f
+        val screenHeight = bodyHeight * 0.72f
+        val screenCorner = CornerRadius(6.dp.toPx(), 6.dp.toPx())
+
+        drawRoundRect(
+            color = strokeColor.copy(alpha = 0.4f),
+            topLeft = Offset(screenLeft, screenTop),
+            size = Size(screenWidth, screenHeight),
+            cornerRadius = screenCorner,
+            style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // 4. Stand / Feet
+        drawLine(
+            color = strokeColor,
+            start = Offset(bodyLeft + bodyWidth * 0.25f, bodyTop + bodyHeight),
+            end = Offset(bodyLeft + bodyWidth * 0.20f, bodyTop + bodyHeight + 4.dp.toPx()),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = strokeColor,
+            start = Offset(bodyLeft + bodyWidth * 0.75f, bodyTop + bodyHeight),
+            end = Offset(bodyLeft + bodyWidth * 0.80f, bodyTop + bodyHeight + 4.dp.toPx()),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+/**
+ * Clapperboard Emblem Icon for "Films"
+ */
+@Composable
+fun ClapperboardEmblemIcon(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val strokeColor = ColorGreenNeon
+        val strokeW = 2.4.dp.toPx()
+
+        // Main Clapper Body
+        val bodyLeft = w * 0.14f
+        val bodyTop = h * 0.24f
+        val bodyWidth = w * 0.72f
+        val bodyHeight = h * 0.58f
+        val corner = CornerRadius(8.dp.toPx(), 8.dp.toPx())
+
+        drawRoundRect(
+            color = strokeColor,
+            topLeft = Offset(bodyLeft, bodyTop),
+            size = Size(bodyWidth, bodyHeight),
+            cornerRadius = corner,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Clapper Head Divider Line
+        drawLine(
+            color = strokeColor,
+            start = Offset(bodyLeft, bodyTop + bodyHeight * 0.32f),
+            end = Offset(bodyLeft + bodyWidth, bodyTop + bodyHeight * 0.32f),
+            strokeWidth = strokeW
+        )
+
+        // Clapper Slanted Bars on top head
+        drawLine(
+            color = strokeColor,
+            start = Offset(w * 0.34f, bodyTop),
+            end = Offset(w * 0.26f, bodyTop + bodyHeight * 0.32f),
+            strokeWidth = 2.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = strokeColor,
+            start = Offset(w * 0.54f, bodyTop),
+            end = Offset(w * 0.46f, bodyTop + bodyHeight * 0.32f),
+            strokeWidth = 2.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = strokeColor,
+            start = Offset(w * 0.74f, bodyTop),
+            end = Offset(w * 0.66f, bodyTop + bodyHeight * 0.32f),
+            strokeWidth = 2.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+/**
+ * Series TV with Play button emblem for "Series"
+ */
+@Composable
+fun SeriesTvPlayEmblemIcon(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val strokeColor = ColorGreenNeon
+        val strokeW = 2.4.dp.toPx()
+
+        // TV Cabinet
+        val bodyLeft = w * 0.14f
+        val bodyTop = h * 0.24f
+        val bodyWidth = w * 0.72f
+        val bodyHeight = h * 0.58f
+        val corner = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+
+        drawRoundRect(
+            color = strokeColor,
+            topLeft = Offset(bodyLeft, bodyTop),
+            size = Size(bodyWidth, bodyHeight),
+            cornerRadius = corner,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Play Triangle in center
+        val playPath = Path().apply {
+            moveTo(w * 0.42f, h * 0.40f)
+            lineTo(w * 0.64f, h * 0.53f)
+            lineTo(w * 0.42f, h * 0.66f)
+            close()
+        }
+        drawPath(path = playPath, color = strokeColor, style = Fill)
+    }
+}
