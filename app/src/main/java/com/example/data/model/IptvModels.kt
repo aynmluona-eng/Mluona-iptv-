@@ -35,6 +35,36 @@ data class LiveChannel(
     val epgChannelId: String? = null
 )
 
+data class EpgProgram(
+    val id: String? = null,
+    val epgId: String? = null,
+    val title: String,
+    val description: String? = null,
+    val start: String? = null,
+    val end: String? = null,
+    val startTimestamp: Long = 0L,
+    val stopTimestamp: Long = 0L,
+    val nowPlaying: Boolean = false
+) {
+    val durationMinutes: Int
+        get() = if (stopTimestamp > startTimestamp) ((stopTimestamp - startTimestamp) / 60).toInt() else 0
+
+    val progress: Float
+        get() {
+            val now = System.currentTimeMillis() / 1000L
+            if (stopTimestamp <= startTimestamp || now < startTimestamp) return 0f
+            if (now >= stopTimestamp) return 1f
+            return (now - startTimestamp).toFloat() / (stopTimestamp - startTimestamp).toFloat()
+        }
+}
+
+data class ChannelEpg(
+    val streamId: Int,
+    val currentProgram: EpgProgram? = null,
+    val upcomingProgram: EpgProgram? = null,
+    val listings: List<EpgProgram> = emptyList()
+)
+
 data class VodCategory(
     val categoryId: String,
     val categoryName: String

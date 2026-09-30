@@ -160,16 +160,13 @@ fun MluonaTvApp(
         TvDashboardScreen(
           viewModel = viewModel,
           onNavigateToLiveTv = {
-            loadingCategoryType = LoadingCategoryType.LIVE_TV
-            currentScreen = TvScreen.LOADING_CONTENT
+            currentScreen = TvScreen.LIVE_TV
           },
           onNavigateToMovies = {
-            loadingCategoryType = LoadingCategoryType.FILMS
-            currentScreen = TvScreen.LOADING_CONTENT
+            currentScreen = TvScreen.MOVIES
           },
           onNavigateToSeries = {
-            loadingCategoryType = LoadingCategoryType.SERIES
-            currentScreen = TvScreen.LOADING_CONTENT
+            currentScreen = TvScreen.SERIES
           },
           onNavigateToUsers = {
             currentScreen = TvScreen.SAVED_ACCOUNTS

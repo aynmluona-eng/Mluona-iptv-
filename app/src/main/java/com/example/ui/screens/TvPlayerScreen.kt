@@ -132,10 +132,13 @@ fun TvPlayerScreen(
     val coroutineScope = rememberCoroutineScope()
 
     val currentLiveChannel by (viewModel?.selectedLiveChannel ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
+    val epgMap by (viewModel?.epgMap ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())).collectAsState()
+    val liveChannelEpg = currentLiveChannel?.let { epgMap[it.streamId] }
+    val liveProgramTitle = liveChannelEpg?.currentProgram?.title
 
     val currentTitle = if (isLive && currentLiveChannel != null) currentLiveChannel!!.name else title
     val currentChannelNumber = if (isLive && currentLiveChannel != null) currentLiveChannel!!.num else channelNumber
-    val currentEpgInfo = if (isLive && currentLiveChannel != null) (currentLiveChannel!!.epgChannelId ?: "البث الحي المباشر") else epgInfo
+    val currentEpgInfo = if (isLive && currentLiveChannel != null) (liveProgramTitle ?: currentLiveChannel!!.epgChannelId ?: "البث الحي المباشر") else epgInfo
     val resolvedStreamUrl = if (isLive && currentLiveChannel != null) {
         viewModel?.getLiveStreamUrl(currentLiveChannel!!) ?: streamUrl
     } else {
@@ -199,17 +202,17 @@ fun TvPlayerScreen(
         }
     }
 
-    // Auto-hide controls & bottom details for VOD
-    LaunchedEffect(showControls, isPlaying, isLive) {
-        if (!isLive && showControls && isPlaying) {
-            delay(5000)
+    // Auto-hide controls & bottom details for VOD (appear only on movement)
+    LaunchedEffect(showControls, isLive) {
+        if (!isLive && showControls) {
+            delay(3500)
             showControls = false
         }
     }
 
     LaunchedEffect(showBottomDetails, isLive) {
         if (!isLive && showBottomDetails) {
-            delay(7000)
+            delay(3500)
             showBottomDetails = false
         }
     }
@@ -576,28 +579,38 @@ fun TvPlayerScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Buffering Indicator
-        if (isBuffering && playerError == null) {
+        // Buffering Indicator - only appears on movement/interaction or initial tune
+        if (isBuffering && playerError == null && (liveOverlayVisible || showControls)) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                CircularProgressIndicator(
+                    color = Color(0xFF00E676),
+                    modifier = Modifier.size(42.dp),
+                    strokeWidth = 3.dp
+                )
+            }
+        }
+
+        // Pause Indicator - appears only on movement/interaction
+        if (!isPlaying && !isBuffering && playerError == null && (liveOverlayVisible || showControls)) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(
-                        color = Color(0xFF00E676),
-                        modifier = Modifier.size(52.dp),
-                        strokeWidth = 3.dp
-                    )
-                    Text(
-                        text = "جارٍ تحميل البث...",
-                        color = TvTextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
+                    Icon(
+                        imageVector = Icons.Default.Pause,
+                        contentDescription = "توقف",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
                     )
                 }
             }
@@ -786,6 +799,21 @@ fun TvPlayerScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (!liveProgramTitle.isNullOrBlank()) {
+                            Text(
+                                text = "•",
+                                color = Color(0xFF00E676),
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = liveProgramTitle,
+                                color = Color(0xFFA5D6A7),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }

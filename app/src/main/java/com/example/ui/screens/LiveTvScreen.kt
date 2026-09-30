@@ -35,15 +35,25 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.example.data.model.ChannelEpg
+import com.example.data.model.EpgProgram
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -107,6 +117,10 @@ fun LiveTvScreen(
         }
     }
 
+    val epgMap by viewModel.epgMap.collectAsState()
+    val selectedChannelEpg by viewModel.selectedChannelEpg.collectAsState()
+    val isEpgLoading by viewModel.isEpgLoading.collectAsState()
+
     val displayedChannels = remember(channels, searchQuery) {
         if (searchQuery.isBlank()) {
             channels
@@ -115,11 +129,62 @@ fun LiveTvScreen(
         }
     }
 
+    LaunchedEffect(displayedChannels) {
+        if (displayedChannels.isNotEmpty()) {
+            viewModel.preloadEpgForChannels(displayedChannels)
+        }
+    }
+
+    val coroutineScope = rememberCoroutineScope()
+    var numberInputBuffer by remember { mutableStateOf("") }
+    var numberTuneJob by remember { mutableStateOf<Job?>(null) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(ColorThemeDarkBg)
             .padding(horizontal = 24.dp, vertical = 14.dp)
+            .onKeyEvent { keyEvent ->
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    val keyCode = keyEvent.nativeKeyEvent.keyCode
+                    val digit = when (keyCode) {
+                        in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> (keyCode - KeyEvent.KEYCODE_0).toString()
+                        in KeyEvent.KEYCODE_NUMPAD_0..KeyEvent.KEYCODE_NUMPAD_9 -> (keyCode - KeyEvent.KEYCODE_NUMPAD_0).toString()
+                        else -> ""
+                    }
+                    if (digit.isNotEmpty() && numberInputBuffer.length < 5) {
+                        numberInputBuffer += digit
+                        numberTuneJob?.cancel()
+                        numberTuneJob = coroutineScope.launch {
+                            delay(650)
+                            val target = numberInputBuffer.toIntOrNull()
+                            if (target != null) {
+                                val matched = viewModel.playChannelByNumber(target)
+                                if (matched != null) {
+                                    val idx = displayedChannels.indexOfFirst { it.streamId == matched.streamId }
+                                    if (idx >= 0) {
+                                        try { channelsListState.animateScrollToItem(idx) } catch (_: Exception) {}
+                                    }
+                                    onPlayChannel(matched)
+                                }
+                            }
+                            numberInputBuffer = ""
+                        }
+                        true
+                    } else if (numberInputBuffer.isNotEmpty() && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                        numberTuneJob?.cancel()
+                        val target = numberInputBuffer.toIntOrNull()
+                        if (target != null) {
+                            val matched = viewModel.playChannelByNumber(target)
+                            if (matched != null) {
+                                onPlayChannel(matched)
+                            }
+                        }
+                        numberInputBuffer = ""
+                        true
+                    } else false
+                } else false
+            }
             .testTag("live_tv_screen")
     ) {
         Row(
@@ -356,10 +421,12 @@ fun LiveTvScreen(
                                 val isSelected = selectedChannel?.streamId == ch.streamId
                                 val isFav = viewModel.isChannelFavorite(ch.streamId)
                                 val displayName = viewModel.getChannelDisplayName(ch)
+                                val chEpg = epgMap[ch.streamId]
 
                                 ChannelRowCardEnlarged(
                                     channel = ch,
                                     displayName = displayName,
+                                    epg = chEpg,
                                     isSelected = isSelected,
                                     isFavorite = isFav,
                                     modifier = if (index == 0) Modifier.focusRequester(channelsFocusRequester) else Modifier,
@@ -391,40 +458,264 @@ fun LiveTvScreen(
                     .clip(RoundedCornerShape(18.dp))
                     .background(ColorThemeSurface)
                     .border(1.2.dp, ColorThemeBorder, RoundedCornerShape(18.dp))
-                    .padding(22.dp)
+                    .padding(20.dp)
                     .testTag("live_channel_preview_pane")
             ) {
                 if (selectedChannel != null) {
                     val ch = selectedChannel!!
                     val displayName = viewModel.getChannelDisplayName(ch)
                     val isFav = viewModel.isChannelFavorite(ch.streamId)
+                    val selectedEpg = epgMap[ch.streamId] ?: selectedChannelEpg
 
                     Column(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                            // Large Channel Title
-                            Text(
-                                text = displayName,
-                                color = Color.White,
-                                fontSize = 26.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            // Header: Channel Logo + Number + Name
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(58.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(Color(0xFF0F1E16)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (!ch.streamIcon.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = ch.streamIcon,
+                                            contentDescription = displayName,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Tv,
+                                            contentDescription = null,
+                                            tint = ColorThemeNeonGreen,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                }
 
-                            // Program Schedule / EPG Text
-                            Text(
-                                text = "Sem programação para este canal.",
-                                color = Color(0xFF90A4AE),
-                                fontSize = 16.sp,
-                                lineHeight = 22.sp
-                            )
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "CH #${ch.num ?: ch.streamId}",
+                                        color = ColorThemeNeonGreen,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = displayName,
+                                        color = Color.White,
+                                        fontSize = 19.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            // EPG Schedule Content
+                            if (isEpgLoading && selectedEpg == null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = ColorThemeNeonGreen,
+                                            modifier = Modifier.size(22.dp),
+                                            strokeWidth = 2.5.dp
+                                        )
+                                        Text(
+                                            text = "جاري تحميل جدول البرامج (EPG)...",
+                                            color = Color(0xFF90A4AE),
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                }
+                            } else if (selectedEpg?.currentProgram != null || selectedEpg?.listings?.isNotEmpty() == true) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    // 1. Current program card
+                                    val currentProg = selectedEpg.currentProgram
+                                    if (currentProg != null) {
+                                        val startTime = formatEpgTime(currentProg.startTimestamp, currentProg.start)
+                                        val endTime = formatEpgTime(currentProg.stopTimestamp, currentProg.end)
+                                        val timeRange = if (startTime.isNotEmpty() && endTime.isNotEmpty()) "$startTime - $endTime" else startTime
+
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Color(0xFF0D2418))
+                                                .border(1.dp, ColorThemeNeonGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(8.dp)
+                                                        .clip(CircleShape)
+                                                        .background(ColorThemeNeonGreen)
+                                                )
+                                                Text(
+                                                    text = "البرنامج المعروض الآن",
+                                                    color = ColorThemeNeonGreen,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                if (timeRange.isNotEmpty()) {
+                                                    Spacer(modifier = Modifier.weight(1f))
+                                                    Text(timeRange, color = Color(0xFFA5D6A7), fontSize = 11.5.sp)
+                                                }
+                                            }
+                                            Text(
+                                                text = currentProg.title,
+                                                color = Color.White,
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (currentProg.progress > 0f) {
+                                                LinearProgressIndicator(
+                                                    progress = { currentProg.progress },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(3.dp)
+                                                        .clip(RoundedCornerShape(2.dp)),
+                                                    color = ColorThemeNeonGreen,
+                                                    trackColor = Color(0xFF1E3A2B)
+                                                )
+                                            }
+                                            if (!currentProg.description.isNullOrBlank()) {
+                                                Text(
+                                                    text = currentProg.description,
+                                                    color = Color(0xFFB0BEC5),
+                                                    fontSize = 12.sp,
+                                                    maxLines = 3,
+                                                    lineHeight = 16.sp,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // 2. Upcoming programs list
+                                    val upcomingList = selectedEpg.listings.filter { it != selectedEpg.currentProgram }.take(4)
+                                    if (upcomingList.isNotEmpty()) {
+                                        Text(
+                                            text = "البرامج القادمة",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        LazyColumn(
+                                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .weight(1f)
+                                        ) {
+                                            items(upcomingList.size) { idx ->
+                                                val prog = upcomingList[idx]
+                                                val progTime = formatEpgTime(prog.startTimestamp, prog.start)
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(Color(0xFF091611))
+                                                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    if (progTime.isNotEmpty()) {
+                                                        Text(
+                                                            text = progTime,
+                                                            color = ColorThemeNeonGreen,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = prog.title,
+                                                        color = Color(0xFFECEFF1),
+                                                        fontSize = 12.5.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    if (prog.durationMinutes > 0) {
+                                                        Text(
+                                                            text = "${prog.durationMinutes}m",
+                                                            color = Color(0xFF78909C),
+                                                            fontSize = 11.sp
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                        .padding(vertical = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(ColorThemeNeonGreen)
+                                        )
+                                        Text(
+                                            text = "البث المباشر (Live TV)",
+                                            color = ColorThemeNeonGreen,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Text(
+                                        text = "دليل البرامج غير متوفر من مزود البث لهذه القناة حالياً.",
+                                        color = Color(0xFF90A4AE),
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp
+                                    )
+                                }
+                            }
                         }
 
                         // Bottom Actions: Play Channel Button
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             TvTouchButton(
                                 text = strings.playChannel,
                                 icon = Icons.Default.PlayArrow,
@@ -432,7 +723,7 @@ fun LiveTvScreen(
                                 onClick = { onPlayChannel(ch) },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(54.dp),
+                                    .height(50.dp),
                                 testTag = "btn_play_channel"
                             )
 
@@ -443,7 +734,7 @@ fun LiveTvScreen(
                                 onClick = { viewModel.toggleChannelFavorite(ch) },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(48.dp),
+                                    .height(46.dp),
                                 testTag = "btn_fav_channel"
                             )
                         }
@@ -457,6 +748,25 @@ fun LiveTvScreen(
                         )
                     }
                 }
+            }
+        }
+
+        if (numberInputBuffer.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(24.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.85f))
+                    .border(1.5.dp, ColorThemeNeonGreen, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 18.dp, vertical = 10.dp)
+            ) {
+                Text(
+                    text = "CH: $numberInputBuffer -",
+                    color = ColorThemeNeonGreen,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Black
+                )
             }
         }
     }
@@ -553,13 +863,32 @@ private fun SidebarCategoryCardEnlarged(
     }
 }
 
+private fun formatEpgTime(timestampSec: Long, fallbackStr: String?): String {
+    if (timestampSec > 0) {
+        val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+        return sdf.format(Date(timestampSec * 1000L))
+    }
+    if (!fallbackStr.isNullOrBlank()) {
+        val parts = fallbackStr.trim().split(" ")
+        if (parts.size >= 2) {
+            val timePart = parts[1]
+            val timeParts = timePart.split(":")
+            if (timeParts.size >= 2) {
+                return "${timeParts[0]}:${timeParts[1]}"
+            }
+        }
+    }
+    return ""
+}
+
 /**
- * Enlarged Channel Row Card (Height 74dp, Logo 54dp, Font 16sp)
+ * Enlarged Channel Row Card with EPG (Height 84dp, Logo 52dp)
  */
 @Composable
 private fun ChannelRowCardEnlarged(
     channel: LiveChannel,
     displayName: String,
+    epg: ChannelEpg?,
     isSelected: Boolean,
     isFavorite: Boolean,
     modifier: Modifier = Modifier,
@@ -582,7 +911,7 @@ private fun ChannelRowCardEnlarged(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(74.dp)
+            .height(84.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(if (active) ColorThemeSurfaceFocused else ColorThemeSurface)
             .border(
@@ -609,7 +938,7 @@ private fun ChannelRowCardEnlarged(
                     }
                 } else false
             }
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
     ) {
         Row(
@@ -617,16 +946,16 @@ private fun ChannelRowCardEnlarged(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Left: Large Logo + Number & Title
+            // Left: Large Logo + Number & Title & EPG
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.weight(1f)
             ) {
-                // Channel Square Logo (54dp x 54dp)
+                // Channel Square Logo (52dp x 52dp)
                 Box(
                     modifier = Modifier
-                        .size(54.dp)
+                        .size(52.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0xFF0F1E16)),
                     contentAlignment = Alignment.Center
@@ -648,24 +977,90 @@ private fun ChannelRowCardEnlarged(
                     }
                 }
 
-                // Number + Channel Name
+                // Channel Info Column with EPG
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Text(
-                        text = "#${channel.num ?: channel.streamId}",
-                        color = ColorThemeNeonGreen,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = displayName,
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    // Channel Number + Channel Name
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "#${channel.num ?: channel.streamId}",
+                            color = ColorThemeNeonGreen,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = displayName,
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Current Program
+                    val currentProg = epg?.currentProgram
+                    if (currentProg != null) {
+                        val curTime = formatEpgTime(currentProg.startTimestamp, currentProg.start)
+                        val timeLabel = if (curTime.isNotEmpty()) "[$curTime] " else ""
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(ColorThemeNeonGreen)
+                            )
+                            Text(
+                                text = "الآن: $timeLabel${currentProg.title}",
+                                color = Color(0xFFE0E0E0),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (currentProg.progress > 0f) {
+                            LinearProgressIndicator(
+                                progress = { currentProg.progress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(end = 12.dp, top = 1.dp, bottom = 1.dp)
+                                    .height(2.dp)
+                                    .clip(RoundedCornerShape(1.dp)),
+                                color = ColorThemeNeonGreen,
+                                trackColor = Color(0xFF1E3A2B)
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "البث المباشر (Live TV)",
+                            color = Color(0xFF757575),
+                            fontSize = 11.5.sp,
+                            maxLines = 1
+                        )
+                    }
+
+                    // Upcoming Program
+                    val upcomingProg = epg?.upcomingProgram
+                    if (upcomingProg != null) {
+                        val nextTime = formatEpgTime(upcomingProg.startTimestamp, upcomingProg.start)
+                        val timePrefix = if (nextTime.isNotEmpty()) "[$nextTime] " else ""
+                        Text(
+                            text = "التالي: $timePrefix${upcomingProg.title}",
+                            color = Color(0xFF9E9E9E),
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
@@ -687,3 +1082,4 @@ private fun ChannelRowCardEnlarged(
         }
     }
 }
+

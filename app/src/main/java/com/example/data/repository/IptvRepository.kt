@@ -2,6 +2,8 @@ package com.example.data.repository
 
 import com.example.data.model.AccountSession
 import com.example.data.model.AccountType
+import com.example.data.model.ChannelEpg
+import com.example.data.model.EpgProgram
 import com.example.data.model.LiveCategory
 import com.example.data.model.LiveChannel
 import com.example.data.model.SeriesCategory
@@ -559,6 +561,152 @@ class IptvRepository(
             IptvResult.Success(categories)
         } catch (e: Exception) {
             IptvResult.Error("فشل تحميل التصنيفات: ${e.localizedMessage}", e)
+        }
+    }
+
+    /**
+     * Decode EPG title/description if Base64 encoded (standard in Xtream Codes)
+     */
+    private fun decodeEpgText(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        val trimmed = raw.trim()
+        val base64Regex = Regex("^[A-Za-z0-9+/=]+$")
+        if (trimmed.length % 4 == 0 && base64Regex.matches(trimmed) && trimmed.length >= 4) {
+            try {
+                val decoded = android.util.Base64.decode(trimmed, android.util.Base64.DEFAULT)
+                val decodedStr = String(decoded, Charsets.UTF_8).trim()
+                if (decodedStr.isNotBlank() && decodedStr.any { it.isLetter() }) {
+                    return decodedStr
+                }
+            } catch (_: Exception) {}
+        }
+        return trimmed
+    }
+
+    private fun parseTimestamp(tsObj: Any?, dateStr: String?): Long {
+        if (tsObj is Number) return tsObj.toLong()
+        if (tsObj is String) {
+            val parsed = tsObj.toLongOrNull()
+            if (parsed != null && parsed > 0) return parsed
+        }
+        if (!dateStr.isNullOrBlank()) {
+            try {
+                val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+                val d = sdf.parse(dateStr)
+                if (d != null) return d.time / 1000L
+            } catch (_: Exception) {}
+        }
+        return 0L
+    }
+
+    /**
+     * Fetch Short EPG for a specific channel from Xtream server
+     */
+    suspend fun getChannelEpg(
+        session: AccountSession,
+        streamId: Int,
+        limit: Int = 10
+    ): IptvResult<ChannelEpg> = withContext(Dispatchers.IO) {
+        if (session.type == AccountType.M3U) {
+            return@withContext IptvResult.Success(ChannelEpg(streamId = streamId, listings = emptyList()))
+        }
+
+        val url = "${session.serverUrl}/player_api.php?username=${session.username}&password=${session.password}&action=get_short_epg&stream_id=$streamId&limit=$limit"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .build()
+
+        try {
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                return@withContext IptvResult.Error("خطأ في جلب EPG (${response.code})")
+            }
+
+            val body = response.body?.string() ?: ""
+            if (body.isBlank() || body == "[]" || body == "null") {
+                return@withContext IptvResult.Success(ChannelEpg(streamId = streamId, listings = emptyList()))
+            }
+
+            val rawArray: JSONArray? = try {
+                if (body.trim().startsWith("{")) {
+                    val root = JSONObject(body)
+                    root.optJSONArray("epg_listings")
+                } else if (body.trim().startsWith("[")) {
+                    JSONArray(body)
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+
+            if (rawArray == null || rawArray.length() == 0) {
+                return@withContext IptvResult.Success(ChannelEpg(streamId = streamId, listings = emptyList()))
+            }
+
+            val nowSec = System.currentTimeMillis() / 1000L
+            val programs = mutableListOf<EpgProgram>()
+
+            for (i in 0 until rawArray.length()) {
+                val obj = rawArray.optJSONObject(i) ?: continue
+                val rawTitle = obj.optString("title", "")
+                val decodedTitle = decodeEpgText(rawTitle)
+                if (decodedTitle.isBlank()) continue
+
+                val rawDesc = obj.optString("description", "")
+                val decodedDesc = decodeEpgText(rawDesc)
+
+                val startStr = obj.optString("start", "")
+                val endStr = obj.optString("end", "")
+                val startTs = parseTimestamp(obj.opt("start_timestamp"), startStr)
+                val stopTs = parseTimestamp(obj.opt("stop_timestamp"), endStr)
+                val nowPlayingFlag = obj.optInt("now_playing", 0)
+
+                val isNowPlaying = (nowPlayingFlag == 1) ||
+                        (startTs in 1..nowSec && nowSec < stopTs)
+
+                programs.add(
+                    EpgProgram(
+                        id = obj.optString("id", null),
+                        epgId = obj.optString("epg_id", null),
+                        title = decodedTitle,
+                        description = decodedDesc.takeIf { it.isNotBlank() },
+                        start = startStr.takeIf { it.isNotBlank() },
+                        end = endStr.takeIf { it.isNotBlank() },
+                        startTimestamp = startTs,
+                        stopTimestamp = stopTs,
+                        nowPlaying = isNowPlaying
+                    )
+                )
+            }
+
+            // Identify current and upcoming programs
+            var currentProgram = programs.firstOrNull { it.nowPlaying }
+            if (currentProgram == null) {
+                currentProgram = programs.firstOrNull {
+                    it.startTimestamp in 1..nowSec && nowSec < it.stopTimestamp
+                }
+            }
+            if (currentProgram == null && programs.isNotEmpty()) {
+                currentProgram = programs.first()
+            }
+
+            val currentIndex = if (currentProgram != null) programs.indexOf(currentProgram) else -1
+            val upcomingProgram = if (currentIndex in 0 until programs.size - 1) {
+                programs[currentIndex + 1]
+            } else if (programs.size > 1) {
+                programs[1]
+            } else null
+
+            IptvResult.Success(
+                ChannelEpg(
+                    streamId = streamId,
+                    currentProgram = currentProgram,
+                    upcomingProgram = upcomingProgram,
+                    listings = programs
+                )
+            )
+        } catch (e: Exception) {
+            IptvResult.Error("فشل تحميل دليل البرامج: ${e.localizedMessage}", e)
         }
     }
 }

@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.AccountSession
 import com.example.data.model.AccountType
+import com.example.data.model.ChannelEpg
+import com.example.data.model.EpgProgram
 import com.example.data.model.LiveCategory
 import com.example.data.model.LiveChannel
 import com.example.data.model.SeriesCategory
@@ -87,8 +89,23 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
     private val _liveChannels = MutableStateFlow<List<LiveChannel>>(emptyList())
     val liveChannels: StateFlow<List<LiveChannel>> = _liveChannels.asStateFlow()
 
+    private val _allLiveChannels = MutableStateFlow<List<LiveChannel>>(emptyList())
+    val allLiveChannels: StateFlow<List<LiveChannel>> = _allLiveChannels.asStateFlow()
+
     private val _selectedLiveChannel = MutableStateFlow<LiveChannel?>(null)
     val selectedLiveChannel: StateFlow<LiveChannel?> = _selectedLiveChannel.asStateFlow()
+
+    // EPG State
+    private val _epgMap = MutableStateFlow<Map<Int, ChannelEpg>>(emptyMap())
+    val epgMap: StateFlow<Map<Int, ChannelEpg>> = _epgMap.asStateFlow()
+
+    private val _selectedChannelEpg = MutableStateFlow<ChannelEpg?>(null)
+    val selectedChannelEpg: StateFlow<ChannelEpg?> = _selectedChannelEpg.asStateFlow()
+
+    private val _isEpgLoading = MutableStateFlow(false)
+    val isEpgLoading: StateFlow<Boolean> = _isEpgLoading.asStateFlow()
+
+    private val inFlightEpgFetches = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
 
     // VOD & Series State
     private val _vodCategories = MutableStateFlow<List<VodCategory>>(emptyList())
@@ -224,6 +241,7 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
                     val allCats = listOf(LIVE_FAV_CATEGORY, LIVE_RECENT_CATEGORY) + catList
                     _liveCategories.value = allCats
                     _liveChannels.value = channels
+                    _allLiveChannels.value = channels
                     _liveCount.value = channels.size
                     _vodCount.value = 0
                     _seriesCount.value = 0
@@ -286,6 +304,10 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         _liveCount.value = 0
         _vodCount.value = 0
         _seriesCount.value = 0
+        _epgMap.value = emptyMap()
+        _selectedChannelEpg.value = null
+        inFlightEpgFetches.clear()
+        _isEpgLoading.value = false
         _errorMessage.value = null
     }
 
@@ -329,6 +351,7 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
             when (val liveRes = repository.getLiveStreams(session)) {
                 is IptvResult.Success -> {
                     _liveCount.value = liveRes.data.size
+                    _allLiveChannels.value = liveRes.data
                     // Pre-index all channels by category for 0ms instantaneous switching!
                     val grouped = liveRes.data.groupBy { it.categoryId ?: "" }
                     grouped.forEach { (catId, chList) ->
@@ -339,6 +362,8 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
                         val channelsForCat = liveCategoryCache[activeCat.categoryId] ?: emptyList()
                         _liveChannels.value = channelsForCat
                         _selectedLiveChannel.value = channelsForCat.firstOrNull()
+                        channelsForCat.firstOrNull()?.let { selectLiveChannel(it) }
+                        preloadEpgForChannels(channelsForCat)
                     }
                 }
                 is IptvResult.Error -> {}
@@ -504,12 +529,16 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
             val favs = favHistoryManager.getFavoriteChannels()
             _liveChannels.value = favs
             _selectedLiveChannel.value = favs.firstOrNull()
+            favs.firstOrNull()?.let { selectLiveChannel(it) }
+            preloadEpgForChannels(favs)
             return
         }
         if (category.categoryId == ID_RECENTS) {
             val recs = favHistoryManager.getRecentChannels()
             _liveChannels.value = recs
             _selectedLiveChannel.value = recs.firstOrNull()
+            recs.firstOrNull()?.let { selectLiveChannel(it) }
+            preloadEpgForChannels(recs)
             return
         }
 
@@ -518,6 +547,7 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
             val filtered = cachedM3uChannels.filter { it.categoryId == category.categoryId }
             _liveChannels.value = filtered
             _selectedLiveChannel.value = filtered.firstOrNull()
+            filtered.firstOrNull()?.let { selectLiveChannel(it) }
             return
         }
 
@@ -526,6 +556,8 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         if (cached != null) {
             _liveChannels.value = cached
             _selectedLiveChannel.value = cached.firstOrNull()
+            cached.firstOrNull()?.let { selectLiveChannel(it) }
+            preloadEpgForChannels(cached)
             return
         }
 
@@ -534,7 +566,61 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectLiveChannel(channel: LiveChannel) {
         _selectedLiveChannel.value = channel
+        _selectedChannelEpg.value = _epgMap.value[channel.streamId]
+        loadEpgForChannel(channel.streamId)
         favHistoryManager.addChannelToRecent(channel)
+    }
+
+    fun getEpgForChannel(streamId: Int): ChannelEpg? {
+        return _epgMap.value[streamId]
+    }
+
+    fun loadEpgForChannel(streamId: Int, forceRefresh: Boolean = false) {
+        val session = _activeAccount.value ?: return
+        if (session.type == AccountType.M3U) return
+        if (!forceRefresh && _epgMap.value.containsKey(streamId)) {
+            if (_selectedLiveChannel.value?.streamId == streamId) {
+                _selectedChannelEpg.value = _epgMap.value[streamId]
+            }
+            return
+        }
+        if (inFlightEpgFetches.contains(streamId)) return
+        inFlightEpgFetches.add(streamId)
+
+        viewModelScope.launch {
+            if (_selectedLiveChannel.value?.streamId == streamId) {
+                _isEpgLoading.value = true
+            }
+            when (val res = repository.getChannelEpg(session, streamId)) {
+                is IptvResult.Success -> {
+                    _epgMap.value = _epgMap.value + (streamId to res.data)
+                    if (_selectedLiveChannel.value?.streamId == streamId) {
+                        _selectedChannelEpg.value = res.data
+                    }
+                }
+                is IptvResult.Error -> {}
+            }
+            inFlightEpgFetches.remove(streamId)
+            if (_selectedLiveChannel.value?.streamId == streamId) {
+                _isEpgLoading.value = false
+            }
+        }
+    }
+
+    fun preloadEpgForChannels(channels: List<LiveChannel>, limit: Int = 30) {
+        val session = _activeAccount.value ?: return
+        if (session.type == AccountType.M3U) return
+
+        viewModelScope.launch {
+            val toFetch = channels.take(limit).filter { ch ->
+                !_epgMap.value.containsKey(ch.streamId) && !inFlightEpgFetches.contains(ch.streamId)
+            }
+            toFetch.chunked(4).forEach { batch ->
+                batch.forEach { ch ->
+                    loadEpgForChannel(ch.streamId)
+                }
+            }
+        }
     }
 
     fun markMovieWatched(movie: VodMovie) {
@@ -614,14 +700,41 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playChannelByNumber(number: Int): LiveChannel? {
-        val list = _liveChannels.value
-        if (list.isEmpty()) return null
-        val matched = list.firstOrNull { it.num == number }
-            ?: list.getOrNull(number - 1)
-            ?: list.firstOrNull { it.streamId == number }
-        if (matched != null) {
-            _selectedLiveChannel.value = matched
-            return matched
+        val currentList = _liveChannels.value
+        // 1. Check in currently active category channels
+        val matchInCurrent = currentList.firstOrNull { it.num == number }
+            ?: currentList.getOrNull(number - 1)
+            ?: currentList.firstOrNull { it.streamId == number }
+
+        if (matchInCurrent != null) {
+            _selectedLiveChannel.value = matchInCurrent
+            return matchInCurrent
+        }
+
+        // 2. Search across ALL channels in the account
+        val all = _allLiveChannels.value.ifEmpty { currentList }
+        val matchInAll = all.firstOrNull { it.num == number }
+            ?: all.getOrNull(number - 1)
+            ?: all.firstOrNull { it.streamId == number }
+            ?: all.firstOrNull { ch ->
+                val parts = ch.name.split(" ", "-", "_", "|", ":", ".")
+                parts.any { it == number.toString() }
+            }
+
+        if (matchInAll != null) {
+            val catId = matchInAll.categoryId
+            if (catId != null) {
+                val cat = _liveCategories.value.firstOrNull { it.categoryId == catId }
+                if (cat != null) {
+                    _selectedLiveCategory.value = cat
+                    val catChannels = liveCategoryCache[catId] ?: all.filter { it.categoryId == catId }
+                    if (catChannels.isNotEmpty()) {
+                        _liveChannels.value = catChannels
+                    }
+                }
+            }
+            _selectedLiveChannel.value = matchInAll
+            return matchInAll
         }
         return null
     }
@@ -637,6 +750,8 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
                     if (_selectedLiveCategory.value?.categoryId == categoryId) {
                         _liveChannels.value = res.data
                         _selectedLiveChannel.value = res.data.firstOrNull()
+                        res.data.firstOrNull()?.let { selectLiveChannel(it) }
+                        preloadEpgForChannels(res.data)
                     }
                 }
                 is IptvResult.Error -> {
