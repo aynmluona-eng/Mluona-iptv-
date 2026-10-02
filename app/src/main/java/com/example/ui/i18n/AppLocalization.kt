@@ -45,9 +45,11 @@ data class AppText(
     val serverStatus: String,
     val connected: String,
     val ready: String,
-    val timeshift: String,
+    val timeshift: String = "Timeshift",
     val editChannelTitle: String,
-    val enterNewName: String
+    val enterNewName: String,
+    val defaultAccount: String = "Mluona IPTV",
+    val favorites: String = favorite
 )
 
 object LocalizedStrings {

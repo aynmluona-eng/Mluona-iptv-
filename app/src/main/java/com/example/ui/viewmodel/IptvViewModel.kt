@@ -229,20 +229,26 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var accountLoadJob: kotlinx.coroutines.Job? = null
+    private val epgSemaphore = kotlinx.coroutines.sync.Semaphore(3)
+
     fun loadM3u(
         url: String,
         name: String? = null,
+        existingId: String? = null,
         onSuccess: () -> Unit
     ) {
-        viewModelScope.launch {
+        accountLoadJob?.cancel()
+        accountLoadJob = viewModelScope.launch {
             _loginInProgress.value = true
             _loginError.value = null
             _statusMessage.value = "جارٍ تحميل قائمة القنوات وقراءتها..."
 
-            when (val result = repository.loadM3uPlaylist(url, name)) {
+            when (val result = repository.loadM3uPlaylist(url, name, existingId)) {
                 is IptvResult.Success -> {
                     val (session, channels) = result.data
                     cachedM3uChannels = channels
+                    favHistoryManager.setCurrentAccount(session.id)
                     sessionManager.saveAccount(session)
                     _activeAccount.value = session
                     refreshAccounts()
@@ -251,7 +257,7 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
 
                     // Set up categories from M3U
                     val groups = channels.mapNotNull { it.categoryId }.distinct()
-                    val catList = groups.mapIndexed { idx, grp -> LiveCategory(categoryId = grp, categoryName = grp) }
+                    val catList = groups.map { LiveCategory(categoryId = it, categoryName = it) }
                     val allCats = listOf(LIVE_FAV_CATEGORY, LIVE_RECENT_CATEGORY) + catList
                     _liveCategories.value = allCats
                     _liveChannels.value = channels
@@ -274,6 +280,9 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun switchAccount(account: AccountSession) {
+        accountLoadJob?.cancel()
+        clearContent()
+        favHistoryManager.setCurrentAccount(account.id)
         sessionManager.setActiveAccountId(account.id)
         _activeAccount.value = account
         refreshAccounts()
@@ -288,7 +297,7 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
             val next = sessionManager.getActiveAccount()
             _activeAccount.value = next
             if (next != null) {
-                loadAccountContent(next)
+                switchAccount(next)
             } else {
                 clearContent()
             }
@@ -296,14 +305,18 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun logout() {
+        accountLoadJob?.cancel()
         sessionManager.clearActiveSession()
         _activeAccount.value = null
         clearContent()
     }
 
     private fun clearContent() {
+        accountLoadJob?.cancel()
         _liveCategories.value = emptyList()
         _liveChannels.value = emptyList()
+        _allLiveChannels.value = emptyList()
+        cachedM3uChannels = emptyList()
         _selectedLiveCategory.value = null
         _selectedLiveChannel.value = null
         _vodCategories.value = emptyList()
@@ -323,9 +336,22 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         inFlightEpgFetches.clear()
         _isEpgLoading.value = false
         _errorMessage.value = null
+        liveChannelsScrollIndex = 0
+        liveChannelsScrollOffset = 0
+        liveCategoriesScrollIndex = 0
+        liveCategoriesScrollOffset = 0
+        moviesScrollIndex = 0
+        moviesScrollOffset = 0
+        moviesCategoriesScrollIndex = 0
+        seriesScrollIndex = 0
+        seriesScrollOffset = 0
+        seriesCategoriesScrollIndex = 0
     }
 
     fun loadAccountContent(session: AccountSession) {
+        accountLoadJob?.cancel()
+        favHistoryManager.setCurrentAccount(session.id)
+
         if (session.type == AccountType.M3U) {
             if (cachedM3uChannels.isNotEmpty()) {
                 val groups = cachedM3uChannels.mapNotNull { it.categoryId }.distinct()
@@ -336,12 +362,12 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedLiveCategory.value = catList.firstOrNull()
                 _selectedLiveChannel.value = cachedM3uChannels.firstOrNull()
             } else {
-                loadM3u(session.m3uUrl, session.name) {}
+                loadM3u(session.m3uUrl, session.name, existingId = session.id) {}
             }
             return
         }
 
-        viewModelScope.launch {
+        accountLoadJob = viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
 
@@ -588,6 +614,9 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         _selectedLiveChannel.value = channel
         _selectedChannelEpg.value = _epgMap.value[channel.streamId]
         loadEpgForChannel(channel.streamId)
+    }
+
+    fun recordChannelPlayed(channel: LiveChannel) {
         favHistoryManager.addChannelToRecent(channel)
     }
 
@@ -627,17 +656,30 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun preloadEpgForChannels(channels: List<LiveChannel>, limit: Int = 30) {
+    fun preloadEpgForChannels(channels: List<LiveChannel>, limit: Int = 20) {
         val session = _activeAccount.value ?: return
         if (session.type == AccountType.M3U) return
 
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val toFetch = channels.take(limit).filter { ch ->
                 !_epgMap.value.containsKey(ch.streamId) && !inFlightEpgFetches.contains(ch.streamId)
             }
-            toFetch.chunked(4).forEach { batch ->
-                batch.forEach { ch ->
-                    loadEpgForChannel(ch.streamId)
+            for (ch in toFetch) {
+                if (inFlightEpgFetches.contains(ch.streamId)) continue
+                inFlightEpgFetches.add(ch.streamId)
+                epgSemaphore.acquire()
+                try {
+                    val res = repository.getChannelEpg(session, ch.streamId)
+                    if (res is IptvResult.Success) {
+                        _epgMap.value = _epgMap.value + (ch.streamId to res.data)
+                        if (_selectedLiveChannel.value?.streamId == ch.streamId) {
+                            _selectedChannelEpg.value = res.data
+                        }
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    inFlightEpgFetches.remove(ch.streamId)
+                    epgSemaphore.release()
                 }
             }
         }
@@ -812,15 +854,6 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         if (session.type == AccountType.XTREAM) {
             val server = session.serverUrl.trimEnd('/')
             return "$server/movie/${session.username}/${session.password}/$streamId.$extension"
-        }
-        return null
-    }
-
-    fun getSeriesStreamUrl(seriesItem: SeriesItem): String? {
-        val session = _activeAccount.value ?: return null
-        if (session.type == AccountType.XTREAM) {
-            val server = session.serverUrl.trimEnd('/')
-            return "$server/series/${session.username}/${session.password}/${seriesItem.seriesId}.mp4"
         }
         return null
     }

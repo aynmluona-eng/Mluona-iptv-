@@ -198,12 +198,13 @@ fun MluonaTvApp(
           onPlayChannel = { channel ->
             val streamUrl = viewModel.getLiveStreamUrl(channel)
             if (!streamUrl.isNullOrBlank()) {
+              viewModel.recordChannelPlayed(channel)
               playerTitle = channel.name
               playerUrl = streamUrl
               isPlayerLive = true
               playerChannelNumber = channel.num
               playerEpgInfo = channel.epgChannelId ?: "البث الحي المباشر"
-              playerFrequencyInfo = "FHD • 1080p • 50fps"
+              playerFrequencyInfo = null
               previousScreenBeforePlayer = TvScreen.LIVE_TV
               currentScreen = TvScreen.PLAYER
             }
@@ -234,12 +235,13 @@ fun MluonaTvApp(
             onPlayMovie = { vodDetail ->
               val streamUrl = viewModel.getVodStreamUrl(movie) ?: viewModel.getVodStreamUrlFromId(vodDetail.streamId, vodDetail.containerExtension)
               if (!streamUrl.isNullOrBlank()) {
+                viewModel.markMovieWatched(movie)
                 playerTitle = vodDetail.name
                 playerUrl = streamUrl
                 isPlayerLive = false
                 playerChannelNumber = null
                 playerEpgInfo = "فيلم • VOD • ${vodDetail.containerExtension.uppercase()}"
-                playerFrequencyInfo = "1080p FHD"
+                playerFrequencyInfo = null
                 previousScreenBeforePlayer = TvScreen.MOVIE_DETAIL
                 currentScreen = TvScreen.PLAYER
               }
@@ -249,7 +251,9 @@ fun MluonaTvApp(
             }
           )
         } else {
-          currentScreen = TvScreen.MOVIES
+          androidx.compose.runtime.LaunchedEffect(Unit) {
+            currentScreen = TvScreen.MOVIES
+          }
         }
       }
       TvScreen.SERIES -> {
@@ -273,12 +277,13 @@ fun MluonaTvApp(
             onPlayEpisode = { episode, seriesTitle ->
               val streamUrl = viewModel.getEpisodeStreamUrl(episode.id, episode.containerExtension)
               if (!streamUrl.isNullOrBlank()) {
+                viewModel.markSeriesWatched(series)
                 playerTitle = "$seriesTitle - ${episode.title}"
                 playerUrl = streamUrl
                 isPlayerLive = false
                 playerChannelNumber = null
                 playerEpgInfo = "حلقة مسلسل • Series Episode"
-                playerFrequencyInfo = "1080p FHD"
+                playerFrequencyInfo = null
                 previousScreenBeforePlayer = TvScreen.SERIES_DETAIL
                 currentScreen = TvScreen.PLAYER
               }
@@ -288,7 +293,9 @@ fun MluonaTvApp(
             }
           )
         } else {
-          currentScreen = TvScreen.SERIES
+          androidx.compose.runtime.LaunchedEffect(Unit) {
+            currentScreen = TvScreen.SERIES
+          }
         }
       }
       TvScreen.PLAYER -> {

@@ -11,18 +11,19 @@ import org.json.JSONObject
 class FavoritesHistoryManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("mluona_iptv_favorites_history", Context.MODE_PRIVATE)
 
+    private var activeAccountId: String = "default"
+
     companion object {
-        private const val KEY_FAV_CHANNELS = "key_fav_channels"
-        private const val KEY_RECENT_CHANNELS = "key_recent_channels"
-
-        private const val KEY_FAV_MOVIES = "key_fav_movies"
-        private const val KEY_RECENT_MOVIES = "key_recent_movies"
-
-        private const val KEY_FAV_SERIES = "key_fav_series"
-        private const val KEY_RECENT_SERIES = "key_recent_series"
-
         private const val MAX_RECENT_ITEMS = 40
     }
+
+    private fun favChannelsKey() = "key_fav_channels_$activeAccountId"
+    private fun recentChannelsKey() = "key_recent_channels_$activeAccountId"
+    private fun favMoviesKey() = "key_fav_movies_$activeAccountId"
+    private fun recentMoviesKey() = "key_recent_movies_$activeAccountId"
+    private fun favSeriesKey() = "key_fav_series_$activeAccountId"
+    private fun recentSeriesKey() = "key_recent_series_$activeAccountId"
+    private fun customChannelNameKey(streamId: Int) = "custom_ch_name_${activeAccountId}_$streamId"
 
     // In-memory high-speed cache for 0ms latency during fast TV remote navigation
     private val favChannelsCache = mutableListOf<LiveChannel>()
@@ -38,18 +39,41 @@ class FavoritesHistoryManager(context: Context) {
     private val recentSeriesCache = mutableListOf<SeriesItem>()
 
     init {
-        // Pre-warm caches once on initialization
-        favChannelsCache.addAll(loadChannels(KEY_FAV_CHANNELS))
+        reloadCaches()
+    }
+
+    @Synchronized
+    fun setCurrentAccount(accountId: String?) {
+        val newId = if (accountId.isNullOrBlank()) "default" else accountId
+        if (activeAccountId != newId) {
+            activeAccountId = newId
+            reloadCaches()
+        }
+    }
+
+    @Synchronized
+    private fun reloadCaches() {
+        favChannelsCache.clear()
+        favChannelIds.clear()
+        recentChannelsCache.clear()
+        favMoviesCache.clear()
+        favMovieIds.clear()
+        recentMoviesCache.clear()
+        favSeriesCache.clear()
+        favSeriesIds.clear()
+        recentSeriesCache.clear()
+
+        favChannelsCache.addAll(loadChannels(favChannelsKey()))
         favChannelsCache.forEach { favChannelIds.add(it.streamId) }
-        recentChannelsCache.addAll(loadChannels(KEY_RECENT_CHANNELS))
+        recentChannelsCache.addAll(loadChannels(recentChannelsKey()))
 
-        favMoviesCache.addAll(loadMovies(KEY_FAV_MOVIES))
+        favMoviesCache.addAll(loadMovies(favMoviesKey()))
         favMoviesCache.forEach { favMovieIds.add(it.streamId) }
-        recentMoviesCache.addAll(loadMovies(KEY_RECENT_MOVIES))
+        recentMoviesCache.addAll(loadMovies(recentMoviesKey()))
 
-        favSeriesCache.addAll(loadSeries(KEY_FAV_SERIES))
+        favSeriesCache.addAll(loadSeries(favSeriesKey()))
         favSeriesCache.forEach { favSeriesIds.add(it.seriesId) }
-        recentSeriesCache.addAll(loadSeries(KEY_RECENT_SERIES))
+        recentSeriesCache.addAll(loadSeries(recentSeriesKey()))
     }
 
     // ==========================================
@@ -77,7 +101,7 @@ class FavoritesHistoryManager(context: Context) {
             favChannelIds.add(channel.streamId)
             isNowFav = true
         }
-        saveChannels(KEY_FAV_CHANNELS, favChannelsCache)
+        saveChannels(favChannelsKey(), favChannelsCache)
         return isNowFav
     }
 
@@ -87,11 +111,11 @@ class FavoritesHistoryManager(context: Context) {
     }
 
     fun getCustomChannelName(streamId: Int): String? {
-        return prefs.getString("custom_ch_name_$streamId", null)
+        return prefs.getString(customChannelNameKey(streamId), null)
     }
 
     fun setCustomChannelName(streamId: Int, newName: String) {
-        prefs.edit().putString("custom_ch_name_$streamId", newName).apply()
+        prefs.edit().putString(customChannelNameKey(streamId), newName).apply()
     }
 
     @Synchronized
@@ -103,7 +127,7 @@ class FavoritesHistoryManager(context: Context) {
             recentChannelsCache.clear()
             recentChannelsCache.addAll(trimmed)
         }
-        saveChannels(KEY_RECENT_CHANNELS, recentChannelsCache)
+        saveChannels(recentChannelsKey(), recentChannelsCache)
     }
 
     private fun loadChannels(key: String): List<LiveChannel> {
@@ -173,7 +197,7 @@ class FavoritesHistoryManager(context: Context) {
             favMovieIds.add(movie.streamId)
             isNowFav = true
         }
-        saveMovies(KEY_FAV_MOVIES, favMoviesCache)
+        saveMovies(favMoviesKey(), favMoviesCache)
         return isNowFav
     }
 
@@ -191,7 +215,7 @@ class FavoritesHistoryManager(context: Context) {
             recentMoviesCache.clear()
             recentMoviesCache.addAll(trimmed)
         }
-        saveMovies(KEY_RECENT_MOVIES, recentMoviesCache)
+        saveMovies(recentMoviesKey(), recentMoviesCache)
     }
 
     private fun loadMovies(key: String): List<VodMovie> {
@@ -261,7 +285,7 @@ class FavoritesHistoryManager(context: Context) {
             favSeriesIds.add(series.seriesId)
             isNowFav = true
         }
-        saveSeries(KEY_FAV_SERIES, favSeriesCache)
+        saveSeries(favSeriesKey(), favSeriesCache)
         return isNowFav
     }
 
@@ -279,7 +303,7 @@ class FavoritesHistoryManager(context: Context) {
             recentSeriesCache.clear()
             recentSeriesCache.addAll(trimmed)
         }
-        saveSeries(KEY_RECENT_SERIES, recentSeriesCache)
+        saveSeries(recentSeriesKey(), recentSeriesCache)
     }
 
     private fun loadSeries(key: String): List<SeriesItem> {

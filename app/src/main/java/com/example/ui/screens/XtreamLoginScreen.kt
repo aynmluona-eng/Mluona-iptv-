@@ -74,10 +74,10 @@ fun XtreamLoginScreen(
     val loginError by viewModel.loginError.collectAsState()
     val statusMsg by viewModel.statusMessage.collectAsState()
 
-    var serverUrl by remember { mutableStateOf("http://neo.net.ly") }
-    var username by remember { mutableStateOf("3007n4k655") }
-    var password by remember { mutableStateOf("d4de6278f0") }
-    var accountName by remember { mutableStateOf("Mluona IPTV") }
+    var serverUrl by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var accountName by remember { mutableStateOf("") }
     val scrollState = rememberScrollState()
 
     val submitLogin = {

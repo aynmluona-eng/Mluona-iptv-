@@ -320,8 +320,8 @@ fun TvDashboardScreen(
                 ) {
                     // Films Card
                     CategoryMediumCard(
-                        title = "Films",
-                        subtitle = if (vodCount > 0) "$vodCount videos" else "12 videos",
+                        title = strings.movies,
+                        subtitle = if (vodCount > 0) "$vodCount" else "",
                         iconType = MediumCardIcon.FILMS,
                         isSelected = selectedIndex == 1,
                         focusRequester = filmsFocusRequester,
@@ -458,13 +458,13 @@ fun TvDashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "Profile:",
+                        text = "Playlist:",
                         color = Color(0xFF90A4AE),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Normal
                     )
                     Text(
-                        text = activeAccount?.name ?: "Profile 1",
+                        text = activeAccount?.name ?: strings.defaultAccount,
                         color = ColorGreenNeon,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
@@ -477,7 +477,7 @@ fun TvDashboardScreen(
                     )
 
                     Text(
-                        text = if (vodCount > 0) "$vodCount videos in ${activeAccount?.name ?: "4 lists"}" else "12 videos in 4 lists",
+                        text = "${liveCount} Live • ${vodCount} Movies • ${seriesCount} Series",
                         color = Color(0xFFB0BEC5),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Normal
@@ -490,13 +490,23 @@ fun TvDashboardScreen(
                     )
 
                     Text(
-                        text = "Device ID:",
+                        text = "Device:",
                         color = Color(0xFF90A4AE),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Normal
                     )
+                    val deviceIdStr = remember(context) {
+                        try {
+                            android.provider.Settings.Secure.getString(
+                                context.contentResolver,
+                                android.provider.Settings.Secure.ANDROID_ID
+                            )?.take(12)?.chunked(2)?.joinToString(":") ?: "Android TV"
+                        } catch (_: Exception) {
+                            "Android TV"
+                        }
+                    }
                     Text(
-                        text = "bd:71:0e:43:b2:2e",
+                        text = deviceIdStr,
                         color = ColorGreenNeon,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold

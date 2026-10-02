@@ -49,6 +49,16 @@ class IptvRepository(
         .build()
 ) {
 
+    companion object {
+        const val APP_USER_AGENT = "MluonaIPTV/1.0 (Android TV; Mobile)"
+    }
+
+    private fun JSONObject.optCleanString(name: String, fallback: String? = null): String? {
+        if (!has(name) || isNull(name)) return fallback
+        val v = optString(name, "")
+        return if (v.isBlank() || v.equals("null", ignoreCase = true)) fallback else v
+    }
+
     private fun cleanServerUrl(rawUrl: String): String {
         var url = rawUrl.trim()
         if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
@@ -110,7 +120,7 @@ class IptvRepository(
         val requestUrl = buildXtreamUrl(serverUrl, username, password)
         val request = Request.Builder()
             .url(requestUrl)
-            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .header("User-Agent", APP_USER_AGENT)
             .build()
 
         try {
@@ -197,7 +207,7 @@ class IptvRepository(
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_live_streams", params)
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .header("User-Agent", APP_USER_AGENT)
             .build()
 
         try {
@@ -216,10 +226,10 @@ class IptvRepository(
                         LiveChannel(
                             streamId = streamId,
                             num = obj.optInt("num", i + 1),
-                            name = obj.optString("name", "Channel $streamId"),
-                            streamIcon = obj.optString("stream_icon", null).takeIf { !it.isNullOrBlank() },
-                            categoryId = obj.optString("category_id", null),
-                            epgChannelId = obj.optString("epg_channel_id", null)
+                            name = obj.optCleanString("name", "Channel $streamId") ?: "Channel $streamId",
+                            streamIcon = obj.optCleanString("stream_icon"),
+                            categoryId = obj.optCleanString("category_id"),
+                            epgChannelId = obj.optCleanString("epg_channel_id")
                         )
                     )
                 }
@@ -253,7 +263,7 @@ class IptvRepository(
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_vod_streams", params)
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .header("User-Agent", APP_USER_AGENT)
             .build()
 
         try {
@@ -271,11 +281,11 @@ class IptvRepository(
                     movies.add(
                         VodMovie(
                             streamId = streamId,
-                            name = obj.optString("name", "Movie $streamId"),
-                            streamIcon = obj.optString("stream_icon", null).takeIf { !it.isNullOrBlank() },
-                            rating = obj.optString("rating", null).takeIf { !it.isNullOrBlank() },
-                            categoryId = obj.optString("category_id", null),
-                            containerExtension = obj.optString("container_extension", "mp4")
+                            name = obj.optCleanString("name", "Movie $streamId") ?: "Movie $streamId",
+                            streamIcon = obj.optCleanString("stream_icon"),
+                            rating = obj.optCleanString("rating"),
+                            categoryId = obj.optCleanString("category_id"),
+                            containerExtension = obj.optCleanString("container_extension", "mp4") ?: "mp4"
                         )
                     )
                 }
@@ -309,7 +319,7 @@ class IptvRepository(
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_series", params)
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .header("User-Agent", APP_USER_AGENT)
             .build()
 
         try {
@@ -327,13 +337,13 @@ class IptvRepository(
                     seriesList.add(
                         SeriesItem(
                             seriesId = seriesId,
-                            name = obj.optString("name", "Series $seriesId"),
-                            cover = obj.optString("cover", null).takeIf { !it.isNullOrBlank() },
-                            rating = obj.optString("rating", null).takeIf { !it.isNullOrBlank() },
-                            categoryId = obj.optString("category_id", null),
-                            plot = obj.optString("plot", null).takeIf { !it.isNullOrBlank() },
-                            genre = obj.optString("genre", null).takeIf { !it.isNullOrBlank() },
-                            releaseDate = obj.optString("releaseDate", null).takeIf { !it.isNullOrBlank() }
+                            name = obj.optCleanString("name", "Series $seriesId") ?: "Series $seriesId",
+                            cover = obj.optCleanString("cover"),
+                            rating = obj.optCleanString("rating"),
+                            categoryId = obj.optCleanString("category_id"),
+                            plot = obj.optCleanString("plot"),
+                            genre = obj.optCleanString("genre"),
+                            releaseDate = obj.optCleanString("releaseDate")
                         )
                     )
                 }
@@ -354,7 +364,7 @@ class IptvRepository(
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_series_info", mapOf("series_id" to seriesId.toString()))
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .header("User-Agent", APP_USER_AGENT)
             .build()
 
         try {
@@ -376,11 +386,11 @@ class IptvRepository(
                     val episodes = mutableListOf<SeriesEpisode>()
                     for (j in 0 until epArray.length()) {
                         val epObj = epArray.optJSONObject(j) ?: continue
-                        val epId = epObj.optString("id", "${seriesId}_${sNum}_$j")
+                        val epId = epObj.optCleanString("id", "${seriesId}_${sNum}_$j") ?: "${seriesId}_${sNum}_$j"
                         val epNum = epObj.optInt("episode_num", j + 1)
-                        val title = epObj.optString("title", "Episode $epNum")
-                        val ext = epObj.optString("container_extension", "mp4")
-                        val plot = epObj.optJSONObject("info")?.optString("plot", null)
+                        val title = epObj.optCleanString("title", "Episode $epNum") ?: "Episode $epNum"
+                        val ext = epObj.optCleanString("container_extension", "mp4") ?: "mp4"
+                        val plot = epObj.optJSONObject("info")?.optCleanString("plot")
                         episodes.add(
                             SeriesEpisode(
                                 id = epId,
@@ -408,7 +418,7 @@ class IptvRepository(
                         for (k in 0 until seasonsArr.length()) {
                             val sObj = seasonsArr.optJSONObject(k) ?: continue
                             val sNum = sObj.optInt("season_number", k + 1)
-                            val name = sObj.optString("name", "Season $sNum")
+                            val name = sObj.optCleanString("name", "Season $sNum") ?: "Season $sNum"
                             val epCount = sObj.optInt("episode_count", 0)
                             seasonsList.add(
                                 SeriesSeason(
@@ -423,14 +433,14 @@ class IptvRepository(
 
                 val detail = SeriesDetail(
                     seriesId = seriesId,
-                    name = info.optString("name", "Series $seriesId"),
-                    cover = info.optString("cover", null).takeIf { !it.isNullOrBlank() },
-                    plot = info.optString("plot", null).takeIf { !it.isNullOrBlank() },
-                    genre = info.optString("genre", null).takeIf { !it.isNullOrBlank() },
-                    releaseDate = info.optString("releaseDate", null).takeIf { !it.isNullOrBlank() },
-                    rating = info.optString("rating", null).takeIf { !it.isNullOrBlank() },
-                    cast = info.optString("cast", null).takeIf { !it.isNullOrBlank() },
-                    director = info.optString("director", null).takeIf { !it.isNullOrBlank() },
+                    name = info.optCleanString("name", "Series $seriesId") ?: "Series $seriesId",
+                    cover = info.optCleanString("cover"),
+                    plot = info.optCleanString("plot"),
+                    genre = info.optCleanString("genre"),
+                    releaseDate = info.optCleanString("releaseDate"),
+                    rating = info.optCleanString("rating"),
+                    cast = info.optCleanString("cast"),
+                    director = info.optCleanString("director"),
                     seasons = seasonsList.sortedBy { it.seasonNumber }
                 )
                 IptvResult.Success(detail)
@@ -450,7 +460,7 @@ class IptvRepository(
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_vod_info", mapOf("vod_id" to vodId.toString()))
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .header("User-Agent", APP_USER_AGENT)
             .build()
 
         try {
@@ -465,16 +475,16 @@ class IptvRepository(
 
                 val detail = VodDetail(
                     streamId = vodId,
-                    name = info.optString("name", movieData.optString("name", "Movie $vodId")),
-                    cover = info.optString("cover_big", info.optString("movie_image", null)).takeIf { !it.isNullOrBlank() },
-                    plot = info.optString("plot", info.optString("description", null)).takeIf { !it.isNullOrBlank() },
-                    genre = info.optString("genre", null).takeIf { !it.isNullOrBlank() },
-                    releaseDate = info.optString("releasedate", info.optString("release_date", null)).takeIf { !it.isNullOrBlank() },
-                    rating = info.optString("rating", null).takeIf { !it.isNullOrBlank() },
-                    duration = info.optString("duration", info.optString("duration_secs", null)).takeIf { !it.isNullOrBlank() },
-                    director = info.optString("director", null).takeIf { !it.isNullOrBlank() },
-                    cast = info.optString("cast", info.optString("actors", null)).takeIf { !it.isNullOrBlank() },
-                    containerExtension = movieData.optString("container_extension", "mp4")
+                    name = info.optCleanString("name") ?: movieData.optCleanString("name") ?: "Movie $vodId",
+                    cover = info.optCleanString("cover_big") ?: info.optCleanString("movie_image"),
+                    plot = info.optCleanString("plot") ?: info.optCleanString("description"),
+                    genre = info.optCleanString("genre"),
+                    releaseDate = info.optCleanString("releasedate") ?: info.optCleanString("release_date"),
+                    rating = info.optCleanString("rating"),
+                    duration = info.optCleanString("duration") ?: info.optCleanString("duration_secs"),
+                    director = info.optCleanString("director"),
+                    cast = info.optCleanString("cast") ?: info.optCleanString("actors"),
+                    containerExtension = movieData.optCleanString("container_extension", "mp4") ?: "mp4"
                 )
                 IptvResult.Success(detail)
             }
@@ -486,11 +496,15 @@ class IptvRepository(
     /**
      * Parse and fetch real M3U / M3U8 playlist
      */
-    suspend fun loadM3uPlaylist(rawUrl: String, playlistName: String? = null): IptvResult<Pair<AccountSession, List<LiveChannel>>> = withContext(Dispatchers.IO) {
+    suspend fun loadM3uPlaylist(
+        rawUrl: String,
+        playlistName: String? = null,
+        existingId: String? = null
+    ): IptvResult<Pair<AccountSession, List<LiveChannel>>> = withContext(Dispatchers.IO) {
         val url = cleanServerUrl(rawUrl)
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .header("User-Agent", APP_USER_AGENT)
             .build()
 
         try {
@@ -522,15 +536,17 @@ class IptvRepository(
                         }
 
                         val logoRegex = Regex("""tvg-logo="([^"]+)"""", RegexOption.IGNORE_CASE)
-                        currentLogo = logoRegex.find(line)?.groupValues?.getOrNull(1)
+                        currentLogo = logoRegex.find(line)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
 
                         val groupRegex = Regex("""group-title="([^"]+)"""", RegexOption.IGNORE_CASE)
-                        currentGroup = groupRegex.find(line)?.groupValues?.getOrNull(1)
+                        currentGroup = groupRegex.find(line)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
                     } else if (!line.startsWith("#")) {
                         if (currentName.isNotEmpty()) {
+                            // Compute deterministic stream ID from URL hash so favorites/history remain stable
+                            val stableId = (line.hashCode() and 0x7FFFFFFF).let { if (it <= 0) streamCounter else it }
                             channels.add(
                                 LiveChannel(
-                                    streamId = streamCounter,
+                                    streamId = stableId,
                                     num = streamCounter,
                                     name = currentName,
                                     streamIcon = currentLogo,
@@ -551,7 +567,7 @@ class IptvRepository(
                 }
 
                 val session = AccountSession(
-                    id = java.util.UUID.randomUUID().toString(),
+                    id = existingId ?: java.util.UUID.randomUUID().toString(),
                     name = playlistName?.takeIf { it.isNotBlank() } ?: "M3U Playlist",
                     type = AccountType.M3U,
                     m3uUrl = url,
@@ -570,7 +586,7 @@ class IptvRepository(
     private fun fetchCategories(url: HttpUrl): IptvResult<List<LiveCategory>> {
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .header("User-Agent", APP_USER_AGENT)
             .build()
 
         return try {
@@ -583,8 +599,8 @@ class IptvRepository(
                 val categories = mutableListOf<LiveCategory>()
                 for (i in 0 until array.length()) {
                     val obj = array.optJSONObject(i) ?: continue
-                    val catId = obj.optString("category_id", "")
-                    val catName = obj.optString("category_name", "")
+                    val catId = obj.optCleanString("category_id") ?: ""
+                    val catName = obj.optCleanString("category_name") ?: ""
                     if (catId.isNotBlank() && catName.isNotBlank()) {
                         categories.add(LiveCategory(catId, catName))
                     }
@@ -649,7 +665,7 @@ class IptvRepository(
         )
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "IPTVSmarters/1.0.0 (Linux; Android TV)")
+            .header("User-Agent", APP_USER_AGENT)
             .build()
 
         try {

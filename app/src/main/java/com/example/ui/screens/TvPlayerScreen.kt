@@ -235,27 +235,30 @@ fun TvPlayerScreen(
         }
     }
 
+    var dynamicVideoInfo by remember { mutableStateOf<String?>(frequencyInfo) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
     val exoPlayer = remember {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 1000,
-                /* maxBufferMs = */ 5000,
-                /* bufferForPlaybackMs = */ 250,
-                /* bufferForPlaybackAfterRebufferMs = */ 500
+                /* minBufferMs = */ 15000,
+                /* maxBufferMs = */ 50000,
+                /* bufferForPlaybackMs = */ 1500,
+                /* bufferForPlaybackAfterRebufferMs = */ 3000
             )
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(1000, false)
+            .setBackBuffer(5000, false)
             .build()
 
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("IPTVSmartersPro")
+            .setUserAgent("MluonaIPTV/1.0 (Android TV; ExoPlayer)")
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(4000)
-            .setReadTimeoutMs(8000)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(30000)
             .setKeepPostFor302Redirects(true)
             .setDefaultRequestProperties(
                 mapOf(
-                    "User-Agent" to "IPTVSmartersPro",
+                    "User-Agent" to "MluonaIPTV/1.0 (Android TV; ExoPlayer)",
                     "Accept" to "*/*",
                     "Connection" to "keep-alive"
                 )
@@ -275,6 +278,21 @@ fun TvPlayerScreen(
                     .build()
                 setAudioAttributes(audioAttributes, true)
             }
+    }
+
+    // Stop playback when activity moves to background or stops
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                exoPlayer.pause()
+            } else if (event == androidx.lifecycle.Lifecycle.Event.ON_START && !isBuffering) {
+                exoPlayer.play()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     LaunchedEffect(activeStreamUrl) {
@@ -312,6 +330,18 @@ fun TvPlayerScreen(
 
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
+            }
+
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    val qualityLabel = when {
+                        videoSize.height >= 2160 -> "4K UHD (${videoSize.width}x${videoSize.height})"
+                        videoSize.height >= 1080 -> "1080p FHD (${videoSize.width}x${videoSize.height})"
+                        videoSize.height >= 720 -> "720p HD (${videoSize.width}x${videoSize.height})"
+                        else -> "${videoSize.width}x${videoSize.height} SD"
+                    }
+                    dynamicVideoInfo = qualityLabel
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
