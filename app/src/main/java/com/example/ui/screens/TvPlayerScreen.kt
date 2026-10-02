@@ -217,6 +217,7 @@ fun TvPlayerScreen(
         }
     }
 
+    var dynamicVideoInfo by remember { mutableStateOf<String?>(frequencyInfo) }
     var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
     var activeStreamUrl by remember { mutableStateOf(resolvedStreamUrl) }
     var fallbackAttempted by remember(activeStreamUrl) { mutableStateOf(false) }
@@ -224,6 +225,7 @@ fun TvPlayerScreen(
     LaunchedEffect(resolvedStreamUrl) {
         if (resolvedStreamUrl.isNotBlank() && resolvedStreamUrl != activeStreamUrl) {
             activeStreamUrl = resolvedStreamUrl
+            dynamicVideoInfo = frequencyInfo
             fallbackAttempted = false
             playerError = null
             isBuffering = true
@@ -235,7 +237,6 @@ fun TvPlayerScreen(
         }
     }
 
-    var dynamicVideoInfo by remember { mutableStateOf<String?>(frequencyInfo) }
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
     val exoPlayer = remember {
@@ -280,12 +281,15 @@ fun TvPlayerScreen(
             }
     }
 
-    // Stop playback when activity moves to background or stops
+    var wasPlayingBeforeStop by remember { mutableStateOf(false) }
+
+    // Stop playback when activity moves to background or stops, resume only if was playing
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                wasPlayingBeforeStop = exoPlayer.isPlaying
                 exoPlayer.pause()
-            } else if (event == androidx.lifecycle.Lifecycle.Event.ON_START && !isBuffering) {
+            } else if (event == androidx.lifecycle.Lifecycle.Event.ON_START && wasPlayingBeforeStop) {
                 exoPlayer.play()
             }
         }
@@ -843,6 +847,21 @@ fun TvPlayerScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                        }
+                        if (!dynamicVideoInfo.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.White.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = dynamicVideoInfo ?: "",
+                                    color = Color(0xFFE0E0E0),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }

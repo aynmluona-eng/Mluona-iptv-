@@ -73,10 +73,10 @@ class IptvRepository(
         password: String,
         action: String? = null,
         extraParams: Map<String, String> = emptyMap()
-    ): HttpUrl {
+    ): HttpUrl? {
         val base = cleanServerUrl(serverUrl)
         val parsed = base.toHttpUrlOrNull() ?: ("http://" + base.removePrefix("http://").removePrefix("https://")).toHttpUrlOrNull()
-            ?: "http://localhost".toHttpUrlOrNull()!!
+            ?: return null
 
         val builder = parsed.newBuilder()
             .addPathSegment("player_api.php")
@@ -118,6 +118,7 @@ class IptvRepository(
         }
 
         val requestUrl = buildXtreamUrl(serverUrl, username, password)
+            ?: return@withContext IptvResult.Error("رابط الخادم غير صالح، تحقق من كتابة الرابط بشكل صحيح")
         val request = Request.Builder()
             .url(requestUrl)
             .header("User-Agent", APP_USER_AGENT)
@@ -193,6 +194,7 @@ class IptvRepository(
      */
     suspend fun getLiveCategories(session: AccountSession): IptvResult<List<LiveCategory>> = withContext(Dispatchers.IO) {
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_live_categories")
+            ?: return@withContext IptvResult.Error("رابط الخادم غير صالح")
         fetchCategories(url)
     }
 
@@ -205,6 +207,7 @@ class IptvRepository(
     ): IptvResult<List<LiveChannel>> = withContext(Dispatchers.IO) {
         val params = if (!categoryId.isNullOrBlank() && categoryId != "all") mapOf("category_id" to categoryId) else emptyMap()
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_live_streams", params)
+            ?: return@withContext IptvResult.Error("رابط الخادم غير صالح")
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", APP_USER_AGENT)
@@ -245,6 +248,7 @@ class IptvRepository(
      */
     suspend fun getVodCategories(session: AccountSession): IptvResult<List<VodCategory>> = withContext(Dispatchers.IO) {
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_vod_categories")
+            ?: return@withContext IptvResult.Error("رابط الخادم غير صالح")
         val res = fetchCategories(url)
         when (res) {
             is IptvResult.Success -> IptvResult.Success(res.data.map { VodCategory(it.categoryId, it.categoryName) })
@@ -261,6 +265,7 @@ class IptvRepository(
     ): IptvResult<List<VodMovie>> = withContext(Dispatchers.IO) {
         val params = if (!categoryId.isNullOrBlank() && categoryId != "all") mapOf("category_id" to categoryId) else emptyMap()
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_vod_streams", params)
+            ?: return@withContext IptvResult.Error("رابط الخادم غير صالح")
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", APP_USER_AGENT)
@@ -301,6 +306,7 @@ class IptvRepository(
      */
     suspend fun getSeriesCategories(session: AccountSession): IptvResult<List<SeriesCategory>> = withContext(Dispatchers.IO) {
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_series_categories")
+            ?: return@withContext IptvResult.Error("رابط الخادم غير صالح")
         val res = fetchCategories(url)
         when (res) {
             is IptvResult.Success -> IptvResult.Success(res.data.map { SeriesCategory(it.categoryId, it.categoryName) })
@@ -317,6 +323,7 @@ class IptvRepository(
     ): IptvResult<List<SeriesItem>> = withContext(Dispatchers.IO) {
         val params = if (!categoryId.isNullOrBlank() && categoryId != "all") mapOf("category_id" to categoryId) else emptyMap()
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_series", params)
+            ?: return@withContext IptvResult.Error("رابط الخادم غير صالح")
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", APP_USER_AGENT)
@@ -362,6 +369,7 @@ class IptvRepository(
         seriesId: Int
     ): IptvResult<SeriesDetail> = withContext(Dispatchers.IO) {
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_series_info", mapOf("series_id" to seriesId.toString()))
+            ?: return@withContext IptvResult.Error("رابط الخادم غير صالح")
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", APP_USER_AGENT)
@@ -458,6 +466,7 @@ class IptvRepository(
         vodId: Int
     ): IptvResult<VodDetail> = withContext(Dispatchers.IO) {
         val url = buildXtreamUrl(session.serverUrl, session.username, session.password, "get_vod_info", mapOf("vod_id" to vodId.toString()))
+            ?: return@withContext IptvResult.Error("رابط الخادم غير صالح")
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", APP_USER_AGENT)
@@ -662,7 +671,7 @@ class IptvRepository(
             session.password,
             "get_short_epg",
             mapOf("stream_id" to streamId.toString(), "limit" to limit.toString())
-        )
+        ) ?: return@withContext IptvResult.Error("رابط الخادم غير صالح")
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", APP_USER_AGENT)
