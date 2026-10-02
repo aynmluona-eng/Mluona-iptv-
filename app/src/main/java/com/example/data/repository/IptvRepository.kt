@@ -726,8 +726,8 @@ class IptvRepository(
 
                     programs.add(
                         EpgProgram(
-                            id = obj.optString("id", null),
-                            epgId = obj.optString("epg_id", null),
+                            id = obj.optString("id", null as String?),
+                            epgId = obj.optString("epg_id", null as String?),
                             title = decodedTitle,
                             description = decodedDesc.takeIf { it.isNotBlank() },
                             start = startStr.takeIf { it.isNotBlank() },

@@ -3,8 +3,8 @@ import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesS
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.google.devtools.ksp)
-  alias(libs.plugins.roborazzi)
+  // alias(libs.plugins.google.devtools.ksp)
+  // alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
 }
@@ -24,18 +24,34 @@ android {
   }
 
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+    val releaseKeystore = sequenceOf(
+      System.getenv("KEYSTORE_PATH")?.let { file(it) },
+      file("${rootDir}/release.keystore"),
+      file("${rootDir}/my-upload-key.jks"),
+      file("${rootDir}/debug.keystore")
+    ).filterNotNull().firstOrNull { it.exists() }
+
+    if (releaseKeystore != null) {
+      create("release") {
+        storeFile = releaseKeystore
+        storePassword = System.getenv("STORE_PASSWORD") ?: System.getenv("STORE_PASS") ?: "android"
+        keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"
+        keyPassword = System.getenv("KEY_PASSWORD") ?: System.getenv("KEY_PASS") ?: "android"
+      }
     }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+
+    val localDebugKeystore = sequenceOf(
+      file("${rootDir}/debug.keystore"),
+      file("${System.getProperty("user.home")}/.android/debug.keystore")
+    ).firstOrNull { it.exists() }
+
+    if (localDebugKeystore != null) {
+      create("debugConfig") {
+        storeFile = localDebugKeystore
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+      }
     }
   }
 
@@ -44,9 +60,15 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      signingConfigs.findByName("release")?.let {
+        signingConfig = it
+      }
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      signingConfigs.findByName("debugConfig")?.let {
+        signingConfig = it
+      }
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -77,7 +99,7 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
+  // implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)

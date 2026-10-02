@@ -188,10 +188,10 @@ class FavoritesHistoryManager(context: Context) {
                         streamId = obj.getInt("streamId"),
                         num = if (obj.has("num")) obj.getInt("num") else null,
                         name = obj.getString("name"),
-                        streamIcon = obj.optString("streamIcon", null),
-                        categoryId = obj.optString("categoryId", null),
-                        directSourceUrl = obj.optString("directSourceUrl", null),
-                        epgChannelId = obj.optString("epgChannelId", null)
+                        streamIcon = obj.optString("streamIcon", null as String?),
+                        categoryId = obj.optString("categoryId", null as String?),
+                        directSourceUrl = obj.optString("directSourceUrl", null as String?),
+                        epgChannelId = obj.optString("epgChannelId", null as String?)
                     )
                 )
             }
@@ -275,11 +275,11 @@ class FavoritesHistoryManager(context: Context) {
                     VodMovie(
                         streamId = obj.getInt("streamId"),
                         name = obj.getString("name"),
-                        streamIcon = obj.optString("streamIcon", null),
-                        rating = obj.optString("rating", null),
-                        categoryId = obj.optString("categoryId", null),
+                        streamIcon = obj.optString("streamIcon", null as String?),
+                        rating = obj.optString("rating", null as String?),
+                        categoryId = obj.optString("categoryId", null as String?),
                         containerExtension = obj.optString("containerExtension", "mp4"),
-                        directSourceUrl = obj.optString("directSourceUrl", null)
+                        directSourceUrl = obj.optString("directSourceUrl", null as String?)
                     )
                 )
             }
@@ -363,9 +363,9 @@ class FavoritesHistoryManager(context: Context) {
                     SeriesItem(
                         seriesId = obj.getInt("seriesId"),
                         name = obj.getString("name"),
-                        cover = obj.optString("cover", null),
-                        rating = obj.optString("rating", null),
-                        categoryId = obj.optString("categoryId", null)
+                        cover = obj.optString("cover", null as String?),
+                        rating = obj.optString("rating", null as String?),
+                        categoryId = obj.optString("categoryId", null as String?)
                     )
                 )
             }
