@@ -42,7 +42,7 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
@@ -96,14 +96,14 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   // implementation(libs.androidx.navigation.compose)
-  implementation(libs.androidx.room.ktx)
-  implementation(libs.androidx.room.runtime)
+  // implementation(libs.androidx.room.ktx)
+  // implementation(libs.androidx.room.runtime)
   implementation(libs.androidx.media3.exoplayer)
   implementation(libs.androidx.media3.ui)
   implementation(libs.androidx.media3.hls)
   implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
+  // implementation(libs.converter.moshi)
+  // implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)
 
@@ -113,24 +113,24 @@ dependencies {
   // implementation(libs.androidx.credentials)
   // implementation(libs.androidx.credentials.play.services)
   // implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
+  // implementation(libs.firebase.appcheck.recaptcha)
+  // implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)
-  implementation(libs.moshi.kotlin)
+  // implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
+  // implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
-  testImplementation(libs.roborazzi)
-  testImplementation(libs.roborazzi.compose)
-  testImplementation(libs.roborazzi.junit.rule)
+  // testImplementation(libs.roborazzi)
+  // testImplementation(libs.roborazzi.compose)
+  // testImplementation(libs.roborazzi.junit.rule)
   androidTestImplementation(platform(libs.androidx.compose.bom))
   androidTestImplementation(libs.androidx.compose.ui.test.junit4)
   androidTestImplementation(libs.androidx.espresso.core)
@@ -138,6 +138,6 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
-  "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
+  // "ksp"(libs.androidx.room.compiler)
+  // "ksp"(libs.moshi.kotlin.codegen)
 }

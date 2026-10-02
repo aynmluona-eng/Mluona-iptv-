@@ -287,9 +287,12 @@ fun TvPlayerScreen(
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
-                wasPlayingBeforeStop = exoPlayer.isPlaying
+                wasPlayingBeforeStop = exoPlayer.playWhenReady
                 exoPlayer.pause()
             } else if (event == androidx.lifecycle.Lifecycle.Event.ON_START && wasPlayingBeforeStop) {
+                if (isLive) {
+                    exoPlayer.seekToDefaultPosition()
+                }
                 exoPlayer.play()
             }
         }
@@ -320,6 +323,24 @@ fun TvPlayerScreen(
     // Update aspect ratio / resize mode when changed
     LaunchedEffect(currentResizeModeIndex, playerViewRef) {
         playerViewRef?.resizeMode = resizeModes[currentResizeModeIndex].mode
+    }
+
+    val currentAudioType by (viewModel?.audioType ?: kotlinx.coroutines.flow.MutableStateFlow("auto")).collectAsState()
+    LaunchedEffect(currentAudioType, exoPlayer) {
+        val params = exoPlayer.trackSelectionParameters.buildUpon()
+        when (currentAudioType) {
+            "stereo" -> {
+                params.setMaxAudioChannelCount(2)
+            }
+            "surround" -> {
+                params.setMaxAudioChannelCount(8)
+                params.setPreferredAudioMimeTypes("audio/eac3", "audio/ac3", "audio/ac4", "audio/true-hd", "audio/vnd.dts")
+            }
+            else -> {
+                params.setMaxAudioChannelCount(Int.MAX_VALUE)
+            }
+        }
+        exoPlayer.trackSelectionParameters = params.build()
     }
 
     DisposableEffect(exoPlayer) {

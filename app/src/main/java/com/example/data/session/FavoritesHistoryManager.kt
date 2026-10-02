@@ -39,7 +39,53 @@ class FavoritesHistoryManager(context: Context) {
     private val recentSeriesCache = mutableListOf<SeriesItem>()
 
     init {
+        migrateLegacyKeysIfNeeded()
         reloadCaches()
+    }
+
+    private fun migrateLegacyKeysIfNeeded() {
+        val legacyKeys = listOf(
+            "key_fav_channels" to "key_fav_channels_default",
+            "key_recent_channels" to "key_recent_channels_default",
+            "key_fav_movies" to "key_fav_movies_default",
+            "key_recent_movies" to "key_recent_movies_default",
+            "key_fav_series" to "key_fav_series_default",
+            "key_recent_series" to "key_recent_series_default"
+        )
+        val editor = prefs.edit()
+        var hasChanges = false
+        for ((oldKey, targetKey) in legacyKeys) {
+            if (prefs.contains(oldKey)) {
+                if (!prefs.contains(targetKey)) {
+                    val data = prefs.getString(oldKey, null)
+                    if (data != null) {
+                        editor.putString(targetKey, data)
+                    }
+                }
+                editor.remove(oldKey)
+                hasChanges = true
+            }
+        }
+        if (hasChanges) {
+            editor.apply()
+        }
+    }
+
+    @Synchronized
+    fun clearAccountData(accountId: String) {
+        val editor = prefs.edit()
+        editor.remove("key_fav_channels_$accountId")
+        editor.remove("key_recent_channels_$accountId")
+        editor.remove("key_fav_movies_$accountId")
+        editor.remove("key_recent_movies_$accountId")
+        editor.remove("key_fav_series_$accountId")
+        editor.remove("key_recent_series_$accountId")
+        val prefix = "custom_ch_name_${accountId}_"
+        prefs.all.keys.filter { it.startsWith(prefix) }.forEach { editor.remove(it) }
+        editor.apply()
+        if (activeAccountId == accountId) {
+            reloadCaches()
+        }
     }
 
     @Synchronized

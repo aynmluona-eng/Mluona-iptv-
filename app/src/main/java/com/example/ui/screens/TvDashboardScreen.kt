@@ -49,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -105,6 +106,8 @@ fun TvDashboardScreen(
     val vodCount by viewModel.vodCount.collectAsState()
     val seriesCount by viewModel.seriesCount.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
+    val loginError by viewModel.loginError.collectAsState()
     val strings by viewModel.appText.collectAsState()
 
     var selectedIndex by remember { mutableIntStateOf(0) }
@@ -272,6 +275,87 @@ fun TvDashboardScreen(
                         onDown = { seriesFocusRequester.requestFocus() },
                         onClick = onNavigateToUsers
                     )
+                }
+            }
+
+            val activeError = errorMessage ?: loginError
+            if (activeError != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF2E1518))
+                        .border(1.dp, Color(0xFFFF5252), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "⚠",
+                            color = Color(0xFFFF5252),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = activeError,
+                            color = Color(0xFFFFCDD2),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        var isRetryFocused by remember { mutableStateOf(false) }
+                        Box(
+                            modifier = Modifier
+                                .onFocusChanged { isRetryFocused = it.isFocused }
+                                .focusable()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isRetryFocused) ColorGreenNeon else Color(0xFFD32F2F))
+                                .border(1.dp, if (isRetryFocused) Color.White else Color.Transparent, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    activeAccount?.let { viewModel.loadAccountContent(it) }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "إعادة المحاولة",
+                                color = if (isRetryFocused) Color.Black else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        var isDismissFocused by remember { mutableStateOf(false) }
+                        Box(
+                            modifier = Modifier
+                                .onFocusChanged { isDismissFocused = it.isFocused }
+                                .focusable()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isDismissFocused) Color.White.copy(alpha = 0.2f) else Color.Transparent)
+                                .clickable {
+                                    viewModel.clearErrors()
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "✕",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
 

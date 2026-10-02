@@ -21,8 +21,6 @@ import com.example.data.session.SessionManager
 import com.example.ui.i18n.AppText
 import com.example.ui.i18n.LocalizedStrings
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -277,11 +275,15 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     is IptvResult.Error -> {
                         _loginError.value = result.message
+                        _errorMessage.value = result.message
                     }
                 }
             } finally {
-                _loginInProgress.value = false
-                _statusMessage.value = null
+                if (coroutineContext[kotlinx.coroutines.Job] == accountLoadJob) {
+                    _loginInProgress.value = false
+                    _isLoading.value = false
+                    _statusMessage.value = null
+                }
             }
         }
     }
@@ -299,6 +301,7 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteAccount(accountId: String) {
         val wasActive = _activeAccount.value?.id == accountId
         sessionManager.deleteAccount(accountId)
+        favHistoryManager.clearAccountData(accountId)
         refreshAccounts()
         if (wasActive) {
             clearContent()
@@ -352,6 +355,12 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         seriesScrollIndex = 0
         seriesScrollOffset = 0
         seriesCategoriesScrollIndex = 0
+
+        _isLoading.value = false
+        _isVodLoading.value = false
+        _isSeriesLoading.value = false
+        _isLiveChannelsLoading.value = false
+        _loginInProgress.value = false
     }
 
     fun loadAccountContent(session: AccountSession) {
@@ -362,14 +371,20 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         if (session.type == AccountType.M3U) {
             if (cachedM3uChannels.isNotEmpty()) {
                 val groups = cachedM3uChannels.mapNotNull { it.categoryId }.distinct()
-                val catList = groups.map { LiveCategory(it, it) }
-                _liveCategories.value = catList
+                val catList = groups.map { LiveCategory(categoryId = it, categoryName = it) }
+                val allCats = listOf(LIVE_FAV_CATEGORY, LIVE_RECENT_CATEGORY) + catList
+                _liveCategories.value = allCats
                 _liveChannels.value = cachedM3uChannels
+                _allLiveChannels.value = cachedM3uChannels
                 _liveCount.value = cachedM3uChannels.size
-                _selectedLiveCategory.value = catList.firstOrNull()
+                _selectedLiveCategory.value = catList.firstOrNull() ?: allCats.firstOrNull()
                 _selectedLiveChannel.value = cachedM3uChannels.firstOrNull()
             } else {
-                loadM3u(session.m3uUrl, session.name, existingId = session.id) {}
+                _isLoading.value = true
+                _errorMessage.value = null
+                loadM3u(session.m3uUrl, session.name, existingId = session.id) {
+                    _isLoading.value = false
+                }
             }
             return
         }
@@ -448,6 +463,7 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _isVodLoading.value = true
+            var delegatedToCategory = false
             try {
                 when (val vodCatRes = repository.getVodCategories(session)) {
                     is IptvResult.Success -> {
@@ -458,13 +474,14 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
                         val firstCat = cats.firstOrNull() ?: fullList.firstOrNull()
                         _selectedVodCategory.value = firstCat
                         if (firstCat != null) {
+                            delegatedToCategory = true
                             selectVodCategory(firstCat)
                         }
                     }
                     is IptvResult.Error -> {}
                 }
             } finally {
-                if (_activeAccount.value?.id == sessionId) {
+                if (_activeAccount.value?.id == sessionId && !delegatedToCategory) {
                     _isVodLoading.value = false
                 }
             }
@@ -531,6 +548,7 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _isSeriesLoading.value = true
+            var delegatedToCategory = false
             try {
                 when (val serCatRes = repository.getSeriesCategories(session)) {
                     is IptvResult.Success -> {
@@ -541,13 +559,14 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
                         val firstCat = cats.firstOrNull() ?: fullList.firstOrNull()
                         _selectedSeriesCategory.value = firstCat
                         if (firstCat != null) {
+                            delegatedToCategory = true
                             selectSeriesCategory(firstCat)
                         }
                     }
                     is IptvResult.Error -> {}
                 }
             } finally {
-                if (_activeAccount.value?.id == sessionId) {
+                if (_activeAccount.value?.id == sessionId && !delegatedToCategory) {
                     _isSeriesLoading.value = false
                 }
             }

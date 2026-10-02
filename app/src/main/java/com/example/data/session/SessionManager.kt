@@ -2,10 +2,16 @@ package com.example.data.session
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Base64
 import com.example.data.model.AccountSession
 import com.example.data.model.AccountType
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 class SessionManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("mluona_iptv_sessions", Context.MODE_PRIVATE)
@@ -16,6 +22,72 @@ class SessionManager(context: Context) {
         private const val KEY_APP_LANGUAGE = "key_app_language"
         private const val KEY_STREAM_FORMAT = "key_stream_format"
         private const val KEY_AUDIO_TYPE = "key_audio_type"
+        private const val KEYSTORE_ALIAS = "MluonaIptvKey"
+        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val ENC_PREFIX = "enc:"
+    }
+
+    private fun getOrCreateSecretKey(): SecretKey {
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        if (!keyStore.containsAlias(KEYSTORE_ALIAS)) {
+            val keyGenerator = KeyGenerator.getInstance(
+                android.security.keystore.KeyProperties.KEY_ALGORITHM_AES,
+                ANDROID_KEYSTORE
+            )
+            val keyGenParameterSpec = android.security.keystore.KeyGenParameterSpec.Builder(
+                KEYSTORE_ALIAS,
+                android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .build()
+            keyGenerator.init(keyGenParameterSpec)
+            return keyGenerator.generateKey()
+        }
+        return (keyStore.getEntry(KEYSTORE_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
+    }
+
+    private fun encryptPassword(plain: String): String {
+        if (plain.isEmpty()) return ""
+        return try {
+            val key = getOrCreateSecretKey()
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, key)
+            val iv = cipher.iv
+            val encrypted = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
+            val combined = ByteArray(iv.size + encrypted.size)
+            System.arraycopy(iv, 0, combined, 0, iv.size)
+            System.arraycopy(encrypted, 0, combined, iv.size, encrypted.size)
+            ENC_PREFIX + Base64.encodeToString(combined, Base64.NO_WRAP)
+        } catch (_: Exception) {
+            "obf:" + Base64.encodeToString(plain.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        }
+    }
+
+    private fun decryptPassword(encoded: String): String {
+        if (encoded.isEmpty()) return ""
+        if (encoded.startsWith("obf:")) {
+            return try {
+                String(Base64.decode(encoded.removePrefix("obf:"), Base64.NO_WRAP), Charsets.UTF_8)
+            } catch (_: Exception) { encoded }
+        }
+        if (!encoded.startsWith(ENC_PREFIX)) {
+            return encoded
+        }
+        return try {
+            val raw = Base64.decode(encoded.removePrefix(ENC_PREFIX), Base64.NO_WRAP)
+            if (raw.size <= 12) return encoded
+            val iv = raw.copyOfRange(0, 12)
+            val ciphertext = raw.copyOfRange(12, raw.size)
+            val key = getOrCreateSecretKey()
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val spec = GCMParameterSpec(128, iv)
+            cipher.init(Cipher.DECRYPT_MODE, key, spec)
+            String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+        } catch (_: Exception) {
+            encoded
+        }
     }
 
     fun getLanguage(): String = prefs.getString(KEY_APP_LANGUAGE, "en") ?: "en"
@@ -75,7 +147,7 @@ class SessionManager(context: Context) {
                         },
                         serverUrl = obj.optString("serverUrl"),
                         username = obj.optString("username"),
-                        password = obj.optString("password"),
+                        password = decryptPassword(obj.optString("password")),
                         m3uUrl = obj.optString("m3uUrl"),
                         status = obj.optString("status", "Active"),
                         expDate = obj.optString("expDate", ""),
@@ -112,7 +184,7 @@ class SessionManager(context: Context) {
                 put("type", account.type.name)
                 put("serverUrl", account.serverUrl)
                 put("username", account.username)
-                put("password", account.password)
+                put("password", encryptPassword(account.password))
                 put("m3uUrl", account.m3uUrl)
                 put("status", account.status)
                 put("expDate", account.expDate)

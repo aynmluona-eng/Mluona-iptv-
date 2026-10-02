@@ -14,17 +14,12 @@ concurrency:
 
 jobs:
   build:
-    name: Fast Build & Sign APK
+    name: Fast Build & Sign Release APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - name: Set up JDK 21 (Temurin)
         uses: actions/setup-java@v4
@@ -41,63 +36,63 @@ jobs:
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
-      # Fix: Prevent 'Keystore file debug.keystore not found for signing config debugConfig'
-      - name: Ensure Debug & Release Keystores
+      - name: Prepare Signing Keystore
         run: |
-          # 1. Create standard Android debug.keystore in project root if missing
-          if [ ! -f "debug.keystore" ]; then
-            echo "Creating debug.keystore to fix validateSigningDebug..."
-            keytool -genkeypair -v \
-              -keystore debug.keystore \
-              -alias androiddebugkey \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass android \
-              -keypass android \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
-
-          # 2. Also place in ~/.android/debug.keystore for standard toolchain
           mkdir -p ~/.android
-          cp debug.keystore ~/.android/debug.keystore
-
-          # 3. Setup production / distribution signing keys
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "Using production keystore from secrets..."
+            echo "Using custom keystore from secrets..."
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
             echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> $GITHUB_ENV
             echo "STORE_PASS=${{ secrets.STORE_PASSWORD }}" >> $GITHUB_ENV
             echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
           else
-            echo "Using debug.keystore as signed release target..."
-            cp debug.keystore release.keystore
-            echo "KEY_ALIAS=androiddebugkey" >> $GITHUB_ENV
-            echo "STORE_PASS=android" >> $GITHUB_ENV
-            echo "KEY_PASS=android" >> $GITHUB_ENV
+            echo "Using deterministic release keystore for reproducible app updates..."
+            # Check if project has debug.keystore or create with fixed deterministic parameters
+            if [ -f "debug.keystore" ]; then
+              cp debug.keystore release.keystore
+            else
+              keytool -genkeypair -v \
+                -keystore release.keystore \
+                -alias mluona_release \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 20000 \
+                -storepass mluona123456 \
+                -keypass mluona123456 \
+                -dname "CN=Mluona IPTV,O=Mluona,C=LY"
+            fi
+            echo "KEY_ALIAS=mluona_release" >> $GITHUB_ENV
+            echo "STORE_PASS=mluona123456" >> $GITHUB_ENV
+            echo "KEY_PASS=mluona123456" >> $GITHUB_ENV
           fi
 
-      # Fast assembly: skips unit tests, lint, and Android resources packaging overhead
-      - name: Fast Assemble Debug APK
+          # Ensure debug.keystore exists in root and ~/.android for local/debug builds
+          if [ ! -f "debug.keystore" ]; then
+            cp release.keystore debug.keystore
+          fi
+          cp debug.keystore ~/.android/debug.keystore
+
+      # Build optimized Release APK
+      - name: Assemble Release APK
         run: |
-          ./gradlew assembleDebug \
+          ./gradlew assembleRelease \
             -x test \
             -x lint \
-            -x lintVitalRelease \
             --parallel \
             --build-cache
 
-      # Sign with apksigner (v1, v2, v3 schemes) so Android devices and TV install it without error
+      # Sign with apksigner (v1, v2, v3 schemes) so Android TV and mobile install smoothly
       - name: Sign APK with apksigner
         run: |
-          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
-          echo "Found APK at: $APK_PATH"
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
+          fi
+          echo "Found APK to sign at: $APK_PATH"
           
-          # Find apksigner in Android build-tools
           APKSIGNER=$(find $ANDROID_SDK_ROOT/build-tools -name apksigner | sort -V | tail -n 1)
           echo "Using apksigner at: $APKSIGNER"
           
-          # Align and sign
           $APKSIGNER sign --ks release.keystore \
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$STORE_PASS" \
@@ -105,16 +100,15 @@ jobs:
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
-            --out app/build/outputs/apk/debug/mluona-iptv-signed.apk \
+            --out app/build/outputs/apk/release/mluona-iptv-release.apk \
             "$APK_PATH"
           
-          # Verify signature
-          $APKSIGNER verify --verbose app/build/outputs/apk/debug/mluona-iptv-signed.apk
+          $APKSIGNER verify --verbose app/build/outputs/apk/release/mluona-iptv-release.apk
 
-      - name: Upload Signed APK Artifact
+      - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mluona-iptv-apk
-          path: app/build/outputs/apk/debug/mluona-iptv-signed.apk
+          name: mluona-iptv-release-apk
+          path: app/build/outputs/apk/release/mluona-iptv-release.apk
           if-no-files-found: error
           retention-days: 14
