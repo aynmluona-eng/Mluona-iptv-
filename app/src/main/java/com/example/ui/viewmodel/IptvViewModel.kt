@@ -107,6 +107,20 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
 
     private val inFlightEpgFetches = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
 
+    // Persistent scroll & focus state across navigation
+    var liveChannelsScrollIndex: Int = 0
+    var liveChannelsScrollOffset: Int = 0
+    var liveCategoriesScrollIndex: Int = 0
+    var liveCategoriesScrollOffset: Int = 0
+
+    var moviesScrollIndex: Int = 0
+    var moviesScrollOffset: Int = 0
+    var moviesCategoriesScrollIndex: Int = 0
+
+    var seriesScrollIndex: Int = 0
+    var seriesScrollOffset: Int = 0
+    var seriesCategoriesScrollIndex: Int = 0
+
     // VOD & Series State
     private val _vodCategories = MutableStateFlow<List<VodCategory>>(emptyList())
     val vodCategories: StateFlow<List<VodCategory>> = _vodCategories.asStateFlow()
@@ -523,41 +537,47 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun selectLiveCategory(category: LiveCategory) {
+    fun selectLiveCategory(category: LiveCategory, resetScroll: Boolean = false) {
+        val prevCat = _selectedLiveCategory.value
         _selectedLiveCategory.value = category
+        if (resetScroll && prevCat?.categoryId != category.categoryId) {
+            liveChannelsScrollIndex = 0
+            liveChannelsScrollOffset = 0
+        }
+
+        fun applyChannels(list: List<LiveChannel>) {
+            _liveChannels.value = list
+            val cur = _selectedLiveChannel.value
+            if (cur == null || !list.any { it.streamId == cur.streamId }) {
+                val first = list.firstOrNull()
+                _selectedLiveChannel.value = first
+                first?.let { selectLiveChannel(it) }
+            } else {
+                selectLiveChannel(cur)
+            }
+            preloadEpgForChannels(list)
+        }
+
         if (category.categoryId == ID_FAVORITES) {
-            val favs = favHistoryManager.getFavoriteChannels()
-            _liveChannels.value = favs
-            _selectedLiveChannel.value = favs.firstOrNull()
-            favs.firstOrNull()?.let { selectLiveChannel(it) }
-            preloadEpgForChannels(favs)
+            applyChannels(favHistoryManager.getFavoriteChannels())
             return
         }
         if (category.categoryId == ID_RECENTS) {
-            val recs = favHistoryManager.getRecentChannels()
-            _liveChannels.value = recs
-            _selectedLiveChannel.value = recs.firstOrNull()
-            recs.firstOrNull()?.let { selectLiveChannel(it) }
-            preloadEpgForChannels(recs)
+            applyChannels(favHistoryManager.getRecentChannels())
             return
         }
 
         val session = _activeAccount.value ?: return
         if (session.type == AccountType.M3U) {
             val filtered = cachedM3uChannels.filter { it.categoryId == category.categoryId }
-            _liveChannels.value = filtered
-            _selectedLiveChannel.value = filtered.firstOrNull()
-            filtered.firstOrNull()?.let { selectLiveChannel(it) }
+            applyChannels(filtered)
             return
         }
 
         // Instant in-memory cache lookup: 0ms latency
         val cached = liveCategoryCache[category.categoryId]
         if (cached != null) {
-            _liveChannels.value = cached
-            _selectedLiveChannel.value = cached.firstOrNull()
-            cached.firstOrNull()?.let { selectLiveChannel(it) }
-            preloadEpgForChannels(cached)
+            applyChannels(cached)
             return
         }
 

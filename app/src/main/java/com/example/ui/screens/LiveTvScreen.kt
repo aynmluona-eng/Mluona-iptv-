@@ -39,6 +39,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.platform.LocalContext
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import com.example.data.model.ChannelEpg
 import com.example.data.model.EpgProgram
 import java.text.SimpleDateFormat
@@ -102,18 +106,42 @@ fun LiveTvScreen(
 
     var searchQuery by remember { mutableStateOf("") }
 
-    val categoriesListState = rememberLazyListState()
-    val channelsListState = rememberLazyListState()
+    val categoriesListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = viewModel.liveCategoriesScrollIndex,
+        initialFirstVisibleItemScrollOffset = viewModel.liveCategoriesScrollOffset
+    )
+    val channelsListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = viewModel.liveChannelsScrollIndex,
+        initialFirstVisibleItemScrollOffset = viewModel.liveChannelsScrollOffset
+    )
+
+    LaunchedEffect(categoriesListState) {
+        snapshotFlow {
+            categoriesListState.firstVisibleItemIndex to categoriesListState.firstVisibleItemScrollOffset
+        }.collect { (index, offset) ->
+            viewModel.liveCategoriesScrollIndex = index
+            viewModel.liveCategoriesScrollOffset = offset
+        }
+    }
+
+    LaunchedEffect(channelsListState) {
+        snapshotFlow {
+            channelsListState.firstVisibleItemIndex to channelsListState.firstVisibleItemScrollOffset
+        }.collect { (index, offset) ->
+            viewModel.liveChannelsScrollIndex = index
+            viewModel.liveChannelsScrollOffset = offset
+        }
+    }
 
     val backFocusRequester = remember { FocusRequester() }
     val searchFocusRequester = remember { FocusRequester() }
     val categoriesFocusRequester = remember { FocusRequester() }
     val channelsFocusRequester = remember { FocusRequester() }
 
-    // Auto-select first category if none selected
+    // Auto-select first category only if none selected
     LaunchedEffect(categories) {
         if (selectedCategory == null && categories.isNotEmpty()) {
-            viewModel.selectLiveCategory(categories.first())
+            viewModel.selectLiveCategory(categories.first(), resetScroll = false)
         }
     }
 
@@ -127,6 +155,37 @@ fun LiveTvScreen(
         } else {
             channels.filter { it.name.contains(searchQuery, ignoreCase = true) }
         }
+    }
+
+    val selectedCategoryIndex = remember(categories, selectedCategory) {
+        if (selectedCategory != null) {
+            val idx = categories.indexOfFirst { it.categoryId == selectedCategory!!.categoryId }
+            if (idx >= 0) idx else 0
+        } else 0
+    }
+
+    val selectedChannelIndex = remember(displayedChannels, selectedChannel) {
+        if (selectedChannel != null) {
+            val idx = displayedChannels.indexOfFirst { it.streamId == selectedChannel!!.streamId }
+            if (idx >= 0) idx else 0
+        } else 0
+    }
+
+    // Scroll to position & focus on entry
+    LaunchedEffect(Unit) {
+        if (viewModel.liveChannelsScrollIndex > 0) {
+            try {
+                channelsListState.scrollToItem(viewModel.liveChannelsScrollIndex, viewModel.liveChannelsScrollOffset)
+            } catch (_: Exception) {}
+        } else if (selectedChannelIndex > 0) {
+            try {
+                channelsListState.scrollToItem(selectedChannelIndex)
+            } catch (_: Exception) {}
+        }
+        delay(100)
+        try {
+            channelsFocusRequester.requestFocus()
+        } catch (_: Exception) {}
     }
 
     LaunchedEffect(displayedChannels) {
@@ -330,17 +389,21 @@ fun LiveTvScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            itemsIndexed(categories, key = { _, cat -> cat.categoryId }) { index, cat ->
+                            itemsIndexed(
+                                items = categories,
+                                key = { _, cat -> cat.categoryId },
+                                contentType = { _, _ -> "category_card" }
+                            ) { index, cat ->
                                 val isSelected = selectedCategory?.categoryId == cat.categoryId
                                 SidebarCategoryCardEnlarged(
                                     category = cat,
                                     isSelected = isSelected,
-                                    modifier = if (index == 0) Modifier.focusRequester(categoriesFocusRequester) else Modifier,
+                                    modifier = if (index == selectedCategoryIndex) Modifier.focusRequester(categoriesFocusRequester) else Modifier,
                                     onSelect = {
-                                        viewModel.selectLiveCategory(cat)
+                                        viewModel.selectLiveCategory(cat, resetScroll = true)
                                     },
                                     onNavigateRight = {
-                                        viewModel.selectLiveCategory(cat)
+                                        viewModel.selectLiveCategory(cat, resetScroll = false)
                                         try {
                                             channelsFocusRequester.requestFocus()
                                         } catch (_: Exception) {}
@@ -417,7 +480,11 @@ fun LiveTvScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            itemsIndexed(displayedChannels, key = { _, it -> it.streamId }) { index, ch ->
+                            itemsIndexed(
+                                items = displayedChannels,
+                                key = { _, it -> it.streamId },
+                                contentType = { _, _ -> "channel_row" }
+                            ) { index, ch ->
                                 val isSelected = selectedChannel?.streamId == ch.streamId
                                 val isFav = viewModel.isChannelFavorite(ch.streamId)
                                 val displayName = viewModel.getChannelDisplayName(ch)
@@ -429,7 +496,7 @@ fun LiveTvScreen(
                                     epg = chEpg,
                                     isSelected = isSelected,
                                     isFavorite = isFav,
-                                    modifier = if (index == 0) Modifier.focusRequester(channelsFocusRequester) else Modifier,
+                                    modifier = if (index == selectedChannelIndex) Modifier.focusRequester(channelsFocusRequester) else Modifier,
                                     onFocus = { viewModel.selectLiveChannel(ch) },
                                     onClick = {
                                         viewModel.selectLiveChannel(ch)
@@ -962,7 +1029,13 @@ private fun ChannelRowCardEnlarged(
                 ) {
                     if (!channel.streamIcon.isNullOrBlank()) {
                         AsyncImage(
-                            model = channel.streamIcon,
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(channel.streamIcon)
+                                .size(128, 128)
+                                .memoryCachePolicy(CachePolicy.ENABLED)
+                                .diskCachePolicy(CachePolicy.ENABLED)
+                                .crossfade(true)
+                                .build(),
                             contentDescription = displayName,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Fit

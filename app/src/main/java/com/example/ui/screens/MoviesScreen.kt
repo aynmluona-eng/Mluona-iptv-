@@ -25,7 +25,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -42,13 +44,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +62,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+import com.example.data.model.VodCategory
 import com.example.data.model.VodMovie
 import com.example.ui.viewmodel.IptvViewModel
 
@@ -83,6 +92,33 @@ fun MoviesScreen(
 
     var searchQuery by remember { mutableStateOf("") }
 
+    val categoriesListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = viewModel.moviesCategoriesScrollIndex
+    )
+    val moviesGridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = viewModel.moviesScrollIndex,
+        initialFirstVisibleItemScrollOffset = viewModel.moviesScrollOffset
+    )
+
+    LaunchedEffect(categoriesListState) {
+        snapshotFlow { categoriesListState.firstVisibleItemIndex }.collect { index ->
+            viewModel.moviesCategoriesScrollIndex = index
+        }
+    }
+
+    LaunchedEffect(moviesGridState) {
+        snapshotFlow { moviesGridState.firstVisibleItemIndex to moviesGridState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                viewModel.moviesScrollIndex = index
+                viewModel.moviesScrollOffset = offset
+            }
+    }
+
+    val backFocusRequester = remember { FocusRequester() }
+    val searchFocusRequester = remember { FocusRequester() }
+    val categoriesFocusRequester = remember { FocusRequester() }
+    val gridFocusRequester = remember { FocusRequester() }
+
     // Auto-select first category if none selected
     LaunchedEffect(categories) {
         if (selectedCategory == null && categories.isNotEmpty()) {
@@ -100,6 +136,13 @@ fun MoviesScreen(
         } else {
             movies.filter { it.name.contains(searchQuery, ignoreCase = true) }
         }
+    }
+
+    val selectedCategoryIndex = remember(categories, selectedCategory) {
+        if (selectedCategory != null) {
+            val idx = categories.indexOfFirst { it.categoryId == selectedCategory!!.categoryId }
+            if (idx >= 0) idx else 0
+        } else 0
     }
 
     Box(
@@ -148,25 +191,32 @@ fun MoviesScreen(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
                             tint = if (isBackFocused) Color.Black else Color.White,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                         Text(
                             text = "Back",
                             color = if (isBackFocused) Color.Black else Color.White,
-                            fontSize = 15.sp,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
-                // Search Movie Input (Enlarged)
+                // Search Box (Enlarged)
+                val searchInteraction = remember { MutableInteractionSource() }
+                val isSearchFocused by searchInteraction.collectIsFocusedAsState()
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(ColorThemeSurface)
-                        .border(1.2.dp, ColorThemeBorder, RoundedCornerShape(12.dp))
+                        .border(
+                            1.5.dp,
+                            if (isSearchFocused) ColorThemeNeonGreen else ColorThemeBorder,
+                            RoundedCornerShape(12.dp)
+                        )
                         .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
@@ -177,15 +227,15 @@ fun MoviesScreen(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Search",
-                            tint = Color(0xFF6B7280),
+                            tint = if (isSearchFocused) ColorThemeNeonGreen else Color(0xFF6B7280),
                             modifier = Modifier.size(20.dp)
                         )
                         Box(modifier = Modifier.weight(1f)) {
                             if (searchQuery.isEmpty()) {
                                 Text(
-                                    text = "Search films...",
+                                    text = "Search film...",
                                     color = Color(0xFF6B7280),
-                                    fontSize = 14.sp
+                                    fontSize = 15.sp
                                 )
                             }
                             BasicTextField(
@@ -193,7 +243,7 @@ fun MoviesScreen(
                                 onValueChange = { searchQuery = it },
                                 textStyle = TextStyle(
                                     color = Color.White,
-                                    fontSize = 14.sp,
+                                    fontSize = 15.sp,
                                     fontWeight = FontWeight.Medium
                                 ),
                                 cursorBrush = SolidColor(ColorThemeNeonGreen),
@@ -204,37 +254,42 @@ fun MoviesScreen(
                     }
                 }
 
-                // Categories List (Enlarged items)
+                // Categories Vertical List (Enlarged Cards)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
                     LazyColumn(
+                        state = categoriesListState,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(categories, key = { it.categoryId }) { cat ->
+                        itemsIndexed(
+                            items = categories,
+                            key = { _, cat -> cat.categoryId },
+                            contentType = { _, _ -> "category_card" }
+                        ) { index, cat ->
                             val isSelected = selectedCategory?.categoryId == cat.categoryId
-                            val catInteraction = remember { MutableInteractionSource() }
-                            val isCatFocused by catInteraction.collectIsFocusedAsState()
-                            val active = isCatFocused || isSelected
+                            val interaction = remember { MutableInteractionSource() }
+                            val isFocused by interaction.collectIsFocusedAsState()
+                            val active = isFocused || isSelected
 
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(52.dp)
+                                    .height(54.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(if (active) ColorThemeSurfaceFocused else ColorThemeSurface)
                                     .border(
-                                        width = if (isCatFocused) 2.dp else if (isSelected) 1.5.dp else 1.dp,
+                                        width = if (isFocused) 2.dp else if (isSelected) 1.5.dp else 1.dp,
                                         color = if (active) ColorThemeNeonGreen else ColorThemeBorder,
                                         shape = RoundedCornerShape(12.dp)
                                     )
-                                    .focusable(interactionSource = catInteraction)
-                                    .clickable(interactionSource = catInteraction, indication = null) {
+                                    .clickable(interactionSource = interaction, indication = null) {
                                         viewModel.selectVodCategory(cat)
                                     }
+                                    .focusable(interactionSource = interaction)
                                     .padding(horizontal = 16.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
@@ -301,13 +356,18 @@ fun MoviesScreen(
                         }
                     } else {
                         LazyVerticalGrid(
+                            state = moviesGridState,
                             columns = GridCells.Adaptive(minSize = 175.dp),
                             contentPadding = PaddingValues(bottom = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            items(displayedMovies, key = { it.streamId }) { movie ->
+                            items(
+                                items = displayedMovies,
+                                key = { it.streamId },
+                                contentType = { "movie_card" }
+                            ) { movie ->
                                 MoviePosterCard(movie = movie, onClick = { onSelectMovie(movie) })
                             }
                         }
@@ -364,7 +424,13 @@ private fun MoviePosterCard(
         ) {
             if (!movie.streamIcon.isNullOrBlank()) {
                 AsyncImage(
-                    model = movie.streamIcon,
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(movie.streamIcon)
+                        .size(256, 384)
+                        .memoryCachePolicy(CachePolicy.ENABLED)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .crossfade(true)
+                        .build(),
                     contentDescription = movie.name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
